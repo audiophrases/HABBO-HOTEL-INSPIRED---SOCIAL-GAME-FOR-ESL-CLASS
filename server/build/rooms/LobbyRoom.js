@@ -53,6 +53,16 @@ class LobbyRoom extends colyseus_1.Room {
         player.username = options.username || "Guest";
         player.x = 400 + (Math.random() * 100 - 50); // random spawn offset
         player.y = 300 + (Math.random() * 100 - 50);
+        if (options.avatarConfig) {
+            player.skin = options.avatarConfig.skin || 0;
+            player.hairColor = options.avatarConfig.hairColor || 0;
+            player.hair = options.avatarConfig.hair || 0;
+            player.eyes = options.avatarConfig.eyes || 0;
+            player.mouth = options.avatarConfig.mouth || 0;
+            player.shirt = options.avatarConfig.shirt || 0;
+            player.glasses = options.avatarConfig.glasses || 0;
+            player.hat = options.avatarConfig.hat || 0;
+        }
         this.state.players.set(client.sessionId, player);
         this.broadcast("chat_message", {
             sender: "System",

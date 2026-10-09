@@ -20,12 +20,10 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
   const data = window.CUP_AVATAR;
   if (!data) return ''; // Loading fallback
 
-  const part = (key: string) => data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0];
-  
-  const head = data.base; // In pinplay it's data.base, wait, let me check avatar-runtime.js again.
-  // "const part = key => data.parts[key][avatar[key] || 0] || data.parts[key][0];"
-  // "const head = part('head')" => Wait! In avatar-parts.js, base is `data.base` but the runtime says `part('head')`. Let me double check avatar-parts.js.
-  // Actually, I looked at avatar-parts.js. It has `"base":{"neck":"...","ears":"...","head":"...","cheeks":"..."}`. It doesn't have a `parts.head`. It is `data.base`.
+  const part = (key: string) => {
+    if (!data.parts[key]) return { svg: '', back: '', front: '' };
+    return data.parts[key][(avatar as any)[key] || 0] || data.parts[key][0];
+  };
   
   const skinColor = data.skins[avatar.skin || 0] || data.skins[0];
   const hairColorHex = data.hairColors[avatar.hairColor || 0] || data.hairColors[0];
@@ -41,10 +39,10 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
     base.head, 
     base.cheeks,
     part('eyes').svg || '', 
-    part('mouth')?.svg || '', 
+    part('mouth').svg || '', 
     hair.front || '', 
-    part('glasses')?.svg || '', 
-    part('hat')?.svg || ''
+    part('glasses').svg || '', 
+    part('hat').svg || ''
   ].join('');
 
   const coloredBody = bodyParts

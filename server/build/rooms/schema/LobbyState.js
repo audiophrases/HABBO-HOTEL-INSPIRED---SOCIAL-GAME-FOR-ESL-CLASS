@@ -17,7 +17,14 @@ class Player extends schema_1.Schema {
         this.x = 400;
         this.y = 300;
         this.username = "";
-        this.avatarId = "default";
+        this.skin = 0;
+        this.hairColor = 0;
+        this.hair = 0;
+        this.eyes = 0;
+        this.mouth = 0;
+        this.shirt = 0;
+        this.glasses = 0;
+        this.hat = 0;
     }
 }
 exports.Player = Player;
@@ -34,9 +41,37 @@ __decorate([
     __metadata("design:type", String)
 ], Player.prototype, "username", void 0);
 __decorate([
-    (0, schema_1.type)("string"),
-    __metadata("design:type", String)
-], Player.prototype, "avatarId", void 0);
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "skin", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "hairColor", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "hair", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "eyes", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "mouth", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "shirt", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "glasses", void 0);
+__decorate([
+    (0, schema_1.type)("number"),
+    __metadata("design:type", Number)
+], Player.prototype, "hat", void 0);
 class ChatMessage extends schema_1.Schema {
     constructor() {
         super(...arguments);
