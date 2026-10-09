@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { AvatarConfig, renderAvatarSvg } from '../utils/AvatarRenderer';
+import { renderAvatarSvg } from '../utils/AvatarRenderer';
+import type { AvatarConfig } from '../utils/AvatarRenderer';
 import './AvatarEditor.css';
 
 interface AvatarEditorProps {

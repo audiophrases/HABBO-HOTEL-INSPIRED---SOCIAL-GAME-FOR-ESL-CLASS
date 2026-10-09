@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import * as Colyseus from 'colyseus.js';
-import { renderAvatarSvg, AvatarConfig } from '../../utils/AvatarRenderer';
+import { renderAvatarSvg } from '../../utils/AvatarRenderer';
+import type { AvatarConfig } from '../../utils/AvatarRenderer';
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;

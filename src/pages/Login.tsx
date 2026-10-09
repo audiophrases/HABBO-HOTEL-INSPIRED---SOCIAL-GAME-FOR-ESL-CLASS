@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AvatarEditor from '../components/AvatarEditor';
-import { AvatarConfig } from '../utils/AvatarRenderer';
+import type { AvatarConfig } from '../utils/AvatarRenderer';
 import './Login.css';
 
 export default function Login() {
