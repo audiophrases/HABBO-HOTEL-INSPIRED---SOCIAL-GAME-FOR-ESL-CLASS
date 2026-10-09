@@ -5,6 +5,7 @@ import type { AvatarConfig } from '../../utils/AvatarRenderer';
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
+  private walls!: Phaser.Physics.Arcade.StaticGroup;
   private username: string = '';
   private room!: Colyseus.Room;
   
@@ -41,6 +42,23 @@ export default class LobbyScene extends Phaser.Scene {
     }
     
     this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
+
+    // Create a StaticGroup for walls/buildings
+    this.walls = this.physics.add.staticGroup();
+
+    // Example walls based on the plaza layout. 
+    // Red rectangles with low opacity so we can see them while building the map.
+    const createWall = (x: number, y: number, w: number, h: number) => {
+      const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0.3);
+      this.physics.add.existing(rect, true); // true = static body
+      this.walls.add(rect);
+    };
+
+    // Placeholder: Big tower on the right
+    createWall(1400, 800, 400, 600);
+    
+    // Placeholder: House on the left
+    createWall(400, 800, 500, 500);
 
     this.room.state.players.onAdd((player: any, sessionId: string) => {
       const isLocal = (sessionId === this.room.sessionId);
@@ -80,6 +98,9 @@ export default class LobbyScene extends Phaser.Scene {
         body.setSize(32, 64);
         body.setOffset(-16, -32);
         body.setCollideWorldBounds(true);
+        
+        // Collide with buildings/walls
+        this.physics.add.collider(this.localPlayerContainer, this.walls);
         
         this.cameras.main.startFollow(this.localPlayerContainer, true, 0.1, 0.1);
       } else {
