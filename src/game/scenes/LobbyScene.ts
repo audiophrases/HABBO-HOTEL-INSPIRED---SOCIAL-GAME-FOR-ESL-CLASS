@@ -6,7 +6,6 @@ import type { AvatarConfig } from '../../utils/AvatarRenderer';
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private walls!: Phaser.Physics.Arcade.StaticGroup;
-  private username: string = '';
   private room!: Colyseus.Room;
   
   private playerEntities: { [sessionId: string]: Phaser.GameObjects.Container } = {};
@@ -17,7 +16,6 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   init(data: { username: string, room: Colyseus.Room }) {
-    this.username = data.username || 'Guest';
     this.room = data.room;
   }
 
@@ -48,7 +46,7 @@ export default class LobbyScene extends Phaser.Scene {
 
     // Helper to create walls from top-left coordinates
     const createWall = (x: number, y: number, w: number, h: number) => {
-      const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0.3).setOrigin(0, 0);
+      const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0).setOrigin(0, 0);
       this.physics.add.existing(rect, true); // true = static body
       this.walls.add(rect);
     };
@@ -120,7 +118,7 @@ export default class LobbyScene extends Phaser.Scene {
       }
     });
 
-    this.room.state.players.onRemove((player: any, sessionId: string) => {
+    this.room.state.players.onRemove((_player: any, sessionId: string) => {
       const container = this.playerEntities[sessionId];
       if (container) {
         container.destroy();
@@ -166,8 +164,7 @@ export default class LobbyScene extends Phaser.Scene {
       const fallback = this.add.rectangle(0, -16, 32, 64, isLocal ? 0xFF5A5F : 0x4285F4);
       container.add(fallback);
       // Ensure name is always on top
-      container.list.forEach(child => child.setDepth(1));
-      fallback.setDepth(0);
+      container.bringToTop(container.list[0]);
       return;
     }
 
@@ -188,13 +185,7 @@ export default class LobbyScene extends Phaser.Scene {
       container.add(sprite);
 
       // Re-sort container so nameplate is above sprite
-      container.list.forEach(child => {
-        if (child instanceof Phaser.GameObjects.Text) {
-          child.setDepth(1);
-        } else {
-          child.setDepth(0);
-        }
-      });
+      container.bringToTop(container.list[0]);
     };
   }
 

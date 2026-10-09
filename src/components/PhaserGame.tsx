@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
 import * as Colyseus from 'colyseus.js';
 import LobbyScene from '../game/scenes/LobbyScene';
@@ -25,12 +25,11 @@ export default function PhaserGame({ username, room }: PhaserGameProps) {
         default: 'arcade',
         arcade: {
           gravity: { x: 0, y: 0 },
-          debug: true
+          debug: false
         }
       },
       scene: [LobbyScene],
       backgroundColor: '#f7f7f9',
-      pixelArt: true,
       scale: {
         mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH

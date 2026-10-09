@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { renderAvatarSvg } from '../utils/AvatarRenderer';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 import './AvatarEditor.css';
@@ -22,7 +22,6 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
     ...initialConfig
   });
 
-  const [svgStr, setSvgStr] = useState<string>('');
   const [catalog, setCatalog] = useState<any>(null);
 
   useEffect(() => {
@@ -36,13 +35,9 @@ export default function AvatarEditor({ initialConfig, onSave, onCancel }: Avatar
     return () => clearInterval(checkCatalog);
   }, []);
 
-  useEffect(() => {
-    if (catalog) {
-      setSvgStr(renderAvatarSvg(config));
-    }
-  }, [config, catalog]);
-
   if (!catalog) return <div className="avatar-loading">Loading Wardrobe...</div>;
+
+  const svgStr = renderAvatarSvg(config);
 
   const handleChange = (part: keyof AvatarConfig, direction: number) => {
     setConfig(prev => {

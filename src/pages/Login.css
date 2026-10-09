@@ -229,3 +229,5 @@
 .safety-badge svg {
   color: #00A699;
 }
+.login-notice, .teacher-link { color: white; text-align: center; }
+.teacher-link { text-decoration: underline; }

@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import * as Colyseus from 'colyseus.js';
 import PhaserGame from '../components/PhaserGame';
+import { websocketUrl } from '../config';
 import './Game.css';
 
 interface GameState {
@@ -34,9 +35,10 @@ export default function Game() {
 
     const connectColyseus = async () => {
       try {
-        const client = new Colyseus.Client('ws://localhost:2567');
+        const client = new Colyseus.Client(websocketUrl);
         const room = await client.joinOrCreate('lobby', { 
           username: state.username,
+          pin: state.roomCode,
           avatarConfig: (state as any).avatarConfig
         });
         roomRef.current = room;
@@ -49,10 +51,16 @@ export default function Game() {
         room.onMessage('chat_warning', (warning: { message: string }) => {
           setMessages(prev => [...prev, { sender: 'System Warning', text: warning.message }]);
         });
+        room.onMessage('chat_pending', (notice: { message: string }) => {
+          setMessages(prev => [...prev, { sender: 'System', text: notice.message }]);
+        });
+        room.onMessage('chat_decision', (notice: { message: string }) => {
+          setMessages(prev => [...prev, { sender: 'System', text: notice.message }]);
+        });
 
       } catch (e) {
         console.error("Colyseus Connection Error:", e);
-        setMessages(prev => [...prev, { sender: 'System Warning', text: 'Error connecting to chat server.' }]);
+        setMessages(prev => [...prev, { sender: 'System Warning', text: 'Could not join. Check the class PIN and ask your teacher to open the class.' }]);
       }
     };
 
@@ -130,7 +138,8 @@ export default function Game() {
             <input 
               type="text" 
               className="chat-input"
-              placeholder="Type to chat (English only)..."
+              placeholder="Type a message for teacher approval..."
+              maxLength={200}
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
               onCopy={handlePreventClipboard}
