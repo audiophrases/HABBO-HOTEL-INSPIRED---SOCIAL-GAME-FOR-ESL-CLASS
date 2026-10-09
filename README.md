@@ -17,6 +17,8 @@ $env:TEACHER_KEY = 'replace-with-a-long-private-key'
 npm run dev
 ```
 
+Restart the server command after changing server code; it compiles TypeScript when it starts.
+
 In another terminal, start the frontend from the project root:
 
 ```powershell
