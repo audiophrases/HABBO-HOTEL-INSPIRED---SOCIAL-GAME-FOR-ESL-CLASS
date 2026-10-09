@@ -19,7 +19,7 @@ const allowedOrigins = process.env.APP_ORIGIN
     ? [process.env.APP_ORIGIN]
     : ["http://localhost:5173", "http://127.0.0.1:5173"];
 app.use((0, cors_1.default)({ origin: allowedOrigins }));
-app.use(express_1.default.json({ limit: "4kb" }));
+app.use(express_1.default.json({ limit: "16kb" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 function sendStudentError(res, error) {
     const status = error instanceof pinplay_1.PinPlayAuthError ? error.status : 503;

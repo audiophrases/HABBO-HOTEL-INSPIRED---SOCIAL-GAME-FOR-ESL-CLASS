@@ -4,7 +4,7 @@ export type Student = { studentKey: string; displayName: string; className: stri
 export type StudentSession = { studentToken: string; expiresAt: number; student: Student };
 export type StudentConfig = { loginEnabled: boolean; googleClientId: string; allowedDomains: string[] };
 
-const sessionKey = 'pinplay.student.v1';
+const sessionKey = 'pixelplaza.student.v1';
 
 export function readStudentSession(): StudentSession | null {
   try {

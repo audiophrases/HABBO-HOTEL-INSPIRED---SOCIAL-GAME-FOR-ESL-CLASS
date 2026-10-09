@@ -6,7 +6,7 @@ A local prototype of a social plaza for an ESL class. Students sign in through P
 
 Install dependencies once in the project root and `server/` with `npm ci`.
 
-PinPlay's student login must be enabled. Add the frontend origin (for example `http://localhost:5173`) to the PinPlay Google OAuth web client's **Authorized JavaScript origins**. The frontend gets that client's public ID through the local server; the server exchanges Google credentials and validates PinPlay student tokens through `https://api.pinplay.win`. Set `PINPLAY_API_URL` on the server only if your PinPlay API is hosted elsewhere. Browsers keep a separate session for each site, so a student may need to sign in again here even if already signed in at PinPlay.
+PinPlay's student login must be enabled. Add the frontend origin (for example `http://localhost:5173`, or `http://127.0.0.1:5173` if that is the address you use) to the PinPlay Google OAuth web client's **Authorized JavaScript origins**. Google currently rejects Pixel Plaza's local origin until this is done. The frontend gets that client's public ID through the local server; the server exchanges Google credentials and validates PinPlay student tokens through `https://api.pinplay.win`. Set `PINPLAY_API_URL` on the server only if your PinPlay API is hosted elsewhere. Browser storage is isolated by origin, so a student may need to sign in again here even if already signed in at PinPlay.
 
 In a PowerShell terminal, set a private class PIN and teacher key, then start the server:
 

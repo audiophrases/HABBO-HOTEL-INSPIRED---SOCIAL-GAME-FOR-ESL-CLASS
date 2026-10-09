@@ -17,7 +17,7 @@ const allowedOrigins = process.env.APP_ORIGIN
     ? [process.env.APP_ORIGIN]
     : ["http://localhost:5173", "http://127.0.0.1:5173"];
 app.use(cors({ origin: allowedOrigins }));
-app.use(express.json({ limit: "4kb" }));
+app.use(express.json({ limit: "16kb" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
 function sendStudentError(res: express.Response, error: unknown): void {
