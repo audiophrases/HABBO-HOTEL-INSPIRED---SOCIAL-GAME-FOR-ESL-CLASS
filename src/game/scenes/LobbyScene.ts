@@ -46,19 +46,24 @@ export default class LobbyScene extends Phaser.Scene {
     // Create a StaticGroup for walls/buildings
     this.walls = this.physics.add.staticGroup();
 
-    // Example walls based on the plaza layout. 
-    // Red rectangles with low opacity so we can see them while building the map.
+    // Helper to create walls from top-left coordinates
     const createWall = (x: number, y: number, w: number, h: number) => {
-      const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0.3);
+      const rect = this.add.rectangle(x, y, w, h, 0xff0000, 0.3).setOrigin(0, 0);
       this.physics.add.existing(rect, true); // true = static body
       this.walls.add(rect);
     };
 
-    // Placeholder: Big tower on the right
-    createWall(1400, 800, 400, 600);
+    // 1. Grand Plaza Hotel (Top Left/Center)
+    createWall(0, 0, 1100, 480);
     
-    // Placeholder: House on the left
-    createWall(400, 800, 500, 500);
+    // 2. Right Tower (Top Right)
+    createWall(1100, 0, 948, 650);
+    
+    // 3. The Rusty Mug (Bottom Right)
+    createWall(1400, 650, 648, 1398);
+    
+    // 4. Bottom Left Trees & Decor
+    createWall(0, 850, 450, 1198);
 
     this.room.state.players.onAdd((player: any, sessionId: string) => {
       const isLocal = (sessionId === this.room.sessionId);
