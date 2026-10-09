@@ -124,3 +124,34 @@
   font-size: 0.95rem;
   border-radius: 8px;
 }
+
+.emote-bar {
+  display: flex;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.emote-btn {
+  background: transparent;
+  border: 1px solid #ddd;
+  border-radius: 20px;
+  padding: 4px 10px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emote-btn:hover {
+  background: var(--secondary);
+  color: white;
+  border-color: var(--secondary);
+  transform: translateY(-2px);
+}
+.emote-btn:active {
+  transform: translateY(0);
+}

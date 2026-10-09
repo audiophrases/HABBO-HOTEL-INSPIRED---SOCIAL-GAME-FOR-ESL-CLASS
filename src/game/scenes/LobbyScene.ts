@@ -102,6 +102,36 @@ export default class LobbyScene extends Phaser.Scene {
       }
       this.textures.remove('avatar_' + sessionId);
     });
+
+    this.room.onMessage("player_emote", (data: { sessionId: string, emote: string }) => {
+      const container = this.playerEntities[data.sessionId];
+      if (container) {
+        this.showEmote(container, data.emote);
+      }
+    });
+  }
+
+  private showEmote(container: Phaser.GameObjects.Container, emote: string) {
+    const emoteText = this.add.text(0, -70, emote, {
+      fontSize: '28px',
+      fontFamily: 'sans-serif'
+    }).setOrigin(0.5);
+    
+    container.add(emoteText);
+    
+    // Make sure emote is always on top
+    emoteText.setDepth(10);
+
+    this.tweens.add({
+      targets: emoteText,
+      y: -120,
+      alpha: 0,
+      duration: 2500,
+      ease: 'Power2',
+      onComplete: () => {
+        emoteText.destroy();
+      }
+    });
   }
 
   private loadSvgToContainer(sessionId: string, svgStr: string, container: Phaser.GameObjects.Container, isLocal: boolean) {

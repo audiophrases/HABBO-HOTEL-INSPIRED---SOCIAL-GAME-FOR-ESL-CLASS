@@ -113,6 +113,18 @@ export default function Game() {
             })}
             <div ref={messagesEndRef} />
           </div>
+          <div className="emote-bar">
+            {['🙋', '❓', '👍', '😂'].map(emote => (
+              <button 
+                key={emote} 
+                className="emote-btn" 
+                onClick={() => roomRef.current?.send('emote', { emote })}
+                title={`Send ${emote} emote`}
+              >
+                {emote}
+              </button>
+            ))}
+          </div>
           
           <form className="chat-input-wrapper" onSubmit={handleSendMessage}>
             <input 

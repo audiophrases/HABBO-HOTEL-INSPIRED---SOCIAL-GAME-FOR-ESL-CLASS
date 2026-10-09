@@ -20,6 +20,13 @@ export class LobbyRoom extends Room<LobbyState> {
             }
         });
 
+        // Handle Emotes
+        this.onMessage("emote", (client, data) => {
+            if (this.state.players.has(client.sessionId)) {
+                this.broadcast("player_emote", { sessionId: client.sessionId, emote: data.emote });
+            }
+        });
+
         // Handle Chat Messages & Moderation
         this.onMessage("chat", (client, data) => {
             const player = this.state.players.get(client.sessionId);
