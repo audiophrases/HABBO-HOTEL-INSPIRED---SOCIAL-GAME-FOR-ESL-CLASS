@@ -26,6 +26,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   create() {
     this.add.grid(0, 0, 4000, 4000, 32, 32, 0x00A699, 0.2, 0x00A699, 0.4).setOrigin(0,0);
+    this.physics.world.setBounds(0, 0, 4000, 4000);
 
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
@@ -70,6 +71,7 @@ export default class LobbyScene extends Phaser.Scene {
         // Adjust body size to approximate the avatar
         body.setSize(32, 64);
         body.setOffset(-16, -32);
+        body.setCollideWorldBounds(true);
         
         this.cameras.main.startFollow(this.localPlayerContainer, true, 0.1, 0.1);
       } else {
