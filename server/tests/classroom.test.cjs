@@ -37,3 +37,12 @@ test('teacher and class secrets must match exactly', () => {
   assert.equal(secretsMatch('1234567', '123456'), false);
   assert.equal(secretsMatch(undefined, '123456'), false);
 });
+
+test('a mute follows the stable student key across connections', () => {
+  const room = new Classroom();
+  room.setMuted('student_key_1', true);
+  assert.equal(room.isMuted('student_key_1'), true);
+  assert.equal(room.isMuted('student_key_2'), false);
+  room.setMuted('student_key_1', false);
+  assert.equal(room.isMuted('student_key_1'), false);
+});

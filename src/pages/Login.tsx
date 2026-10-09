@@ -1,17 +1,64 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import AvatarEditor from '../components/AvatarEditor';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
+import { renderGoogleButton } from '../googleIdentity';
+import {
+  clearStudentSession, exchangeGoogleCredential, fetchStudentConfig,
+  fetchStudentProfile, readStudentSession, saveStudentSession
+} from '../studentAuth';
+import type { StudentConfig, StudentSession } from '../studentAuth';
 import './Login.css';
 
 export default function Login() {
   const [step, setStep] = useState<'details' | 'avatar'>('details');
   const [pin, setPin] = useState('');
-  const [username, setUsername] = useState('');
+  const [session, setSession] = useState<StudentSession | null>(() => readStudentSession());
+  const [config, setConfig] = useState<StudentConfig | null>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const googleButton = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  useEffect(() => {
+    let active = true;
+    void fetchStudentConfig().then(value => { if (active) setConfig(value); })
+      .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load sign-in settings.'); });
+    const saved = readStudentSession();
+    if (saved) {
+      void fetchStudentProfile(saved.studentToken).then(({ student }) => {
+        if (active) {
+          const updated = { ...saved, student };
+          saveStudentSession(updated);
+          setSession(updated);
+        }
+      }).catch(() => {
+        if (active) { clearStudentSession(); setSession(null); }
+      });
+    }
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (step !== 'details' || session || !config?.loginEnabled || !googleButton.current) return;
+    let active = true;
+    void renderGoogleButton(googleButton.current, config.googleClientId, credential => {
+      if (!active) return;
+      setBusy(true);
+      setError('');
+      void exchangeGoogleCredential(credential).then(value => {
+        if (active) { saveStudentSession(value); setSession(value); }
+      }).catch(cause => {
+        if (active) setError(cause instanceof Error ? cause.message : 'Google sign-in failed.');
+      }).finally(() => { if (active) setBusy(false); });
+    }).catch(cause => {
+      if (active) setError(cause instanceof Error ? cause.message : 'Google sign-in could not load.');
+    });
+    return () => { active = false; };
+  }, [config, session, step]);
+
   const handleAvatarSave = (avatarConfig: AvatarConfig) => {
-    navigate('/game', { state: { username: username.trim(), roomCode: pin, avatarConfig } });
+    if (session) navigate('/game', { state: { roomCode: pin, avatarConfig } });
   };
 
   return (
@@ -26,7 +73,7 @@ export default function Login() {
           {step === 'details' ? (
             <form className="login-form" onSubmit={event => {
               event.preventDefault();
-              if (/^\d{4,8}$/.test(pin) && /^[\p{L}\p{N} _-]{2,24}$/u.test(username.trim())) setStep('avatar');
+              if (session && /^\d{4,8}$/.test(pin)) setStep('avatar');
             }}>
               <h2 className="card-title">Join your class</h2>
               <div className="input-group">
@@ -35,12 +82,21 @@ export default function Login() {
                   minLength={4} maxLength={8} autoComplete="off" required value={pin}
                   onChange={event => setPin(event.target.value)} />
               </div>
-              <div className="input-group">
-                <label className="input-label" htmlFor="username">Your display name</label>
-                <input className="input-field" id="username" minLength={2} maxLength={24} required
-                  autoComplete="off" value={username} onChange={event => setUsername(event.target.value)} />
+              <div className="student-signin">
+                {session ? <>
+                  <p>Signed in as <strong>{session.student.displayName}</strong>
+                    {session.student.className ? ` (${session.student.className})` : ''}</p>
+                  <button className="link-btn" type="button" onClick={() => {
+                    clearStudentSession(); setSession(null); setStep('details');
+                  }}>Not you? Sign out</button>
+                </> : <>
+                  <p>Sign in with your PinPlay Google account.</p>
+                  {!config ? <p>Checking student sign-in…</p> : config.loginEnabled
+                    ? <div ref={googleButton} /> : <p>Student sign-in is unavailable. Ask your teacher.</p>}
+                </>}
               </div>
-              <button className="btn btn-primary login-btn" type="submit">Choose your avatar</button>
+              {error && <p role="alert" className="login-error">{error}</p>}
+              <button className="btn btn-primary login-btn" type="submit" disabled={!session || busy}>Choose your avatar</button>
             </form>
           ) : <AvatarEditor onSave={handleAvatarSave} onCancel={() => setStep('details')} />}
           <p className="login-notice">Your teacher can review every message. Messages appear after teacher approval.</p>

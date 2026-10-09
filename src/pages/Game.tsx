@@ -3,11 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import * as Colyseus from 'colyseus.js';
 import PhaserGame from '../components/PhaserGame';
 import { websocketUrl } from '../config';
+import { readStudentSession } from '../studentAuth';
+import type { AvatarConfig } from '../utils/AvatarRenderer';
 import './Game.css';
 
 interface GameState {
-  username: string;
-  roomCode?: string;
+  roomCode: string;
+  avatarConfig: AvatarConfig;
 }
 
 interface ChatMessage {
@@ -19,7 +21,8 @@ interface ChatMessage {
 export default function Game() {
   const location = useLocation();
   const navigate = useNavigate();
-  const state = location.state as GameState;
+  const state = location.state as GameState | null;
+  const [session] = useState(() => readStudentSession());
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -28,7 +31,7 @@ export default function Game() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!state?.username) {
+    if (!state?.roomCode || !session) {
       navigate('/');
       return;
     }
@@ -37,9 +40,9 @@ export default function Game() {
       try {
         const client = new Colyseus.Client(websocketUrl);
         const room = await client.joinOrCreate('lobby', { 
-          username: state.username,
           pin: state.roomCode,
-          avatarConfig: (state as any).avatarConfig
+          studentToken: session.studentToken,
+          avatarConfig: state.avatarConfig
         });
         roomRef.current = room;
         setConnectedRoom(room);
@@ -60,7 +63,7 @@ export default function Game() {
 
       } catch (e) {
         console.error("Colyseus Connection Error:", e);
-        setMessages(prev => [...prev, { sender: 'System Warning', text: 'Could not join. Check the class PIN and ask your teacher to open the class.' }]);
+        setMessages(prev => [...prev, { sender: 'System Warning', text: 'Could not join. Check your class PIN and Google sign-in, and ask your teacher to open the class.' }]);
       }
     };
 
@@ -69,14 +72,14 @@ export default function Game() {
     return () => {
       roomRef.current?.leave();
     };
-  }, [state, navigate]);
+  }, [state, session, navigate]);
 
   // Scroll chat to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  if (!state?.username) return null;
+  if (!state?.roomCode || !session) return null;
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -94,7 +97,7 @@ export default function Game() {
   return (
     <div className="game-container">
       {/* Background Phaser Canvas */}
-      {connectedRoom && <PhaserGame username={state.username} room={connectedRoom} />}
+      {connectedRoom && <PhaserGame username={session.student.displayName} room={connectedRoom} />}
       
       {/* React UI Overlay */}
       <div className="ui-layer">
@@ -102,6 +105,7 @@ export default function Game() {
           <h1 className="heading-pixel" style={{fontSize: '1.2rem', margin: 0}}>Pixel Plaza</h1>
           <div className="room-info">
             <span className="badge">Room: Lobby</span>
+            <span className="badge">{session.student.displayName}</span>
             {state.roomCode && <span className="badge">Class: {state.roomCode}</span>}
           </div>
         </header>

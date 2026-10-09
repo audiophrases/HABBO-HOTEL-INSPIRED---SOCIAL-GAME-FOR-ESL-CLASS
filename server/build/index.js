@@ -9,6 +9,7 @@ const colyseus_1 = require("colyseus");
 const http_1 = require("http");
 const LobbyRoom_1 = require("./rooms/LobbyRoom");
 const classroom_1 = require("./classroom");
+const pinplay_1 = require("./pinplay");
 if (!/^\d{4,8}$/.test(process.env.CLASS_PIN || "") || (process.env.TEACHER_KEY || "").length < 16) {
     throw new Error("Set CLASS_PIN (4–8 digits) and TEACHER_KEY (at least 16 characters) before starting the server.");
 }
@@ -20,6 +21,39 @@ const allowedOrigins = process.env.APP_ORIGIN
 app.use((0, cors_1.default)({ origin: allowedOrigins }));
 app.use(express_1.default.json({ limit: "4kb" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
+function sendStudentError(res, error) {
+    const status = error instanceof pinplay_1.PinPlayAuthError ? error.status : 503;
+    const message = error instanceof pinplay_1.PinPlayAuthError ? error.message : "PinPlay sign-in is temporarily unavailable.";
+    res.status(status).json({ error: message });
+}
+app.get("/api/student/config", async (_req, res) => {
+    try {
+        res.json(await (0, pinplay_1.studentConfig)());
+    }
+    catch (error) {
+        sendStudentError(res, error);
+    }
+});
+app.post("/api/student/login", async (req, res) => {
+    var _a;
+    try {
+        const session = await (0, pinplay_1.studentLogin)((_a = req.body) === null || _a === void 0 ? void 0 : _a.googleIdToken);
+        const student = await (0, pinplay_1.resolveStudent)(session.studentToken);
+        res.json({ ...session, student });
+    }
+    catch (error) {
+        sendStudentError(res, error);
+    }
+});
+app.get("/api/student/me", async (req, res) => {
+    try {
+        const student = await (0, pinplay_1.resolveStudent)(req.header("x-student-token"));
+        res.setHeader("Cache-Control", "no-store").json({ student });
+    }
+    catch (error) {
+        sendStudentError(res, error);
+    }
+});
 app.use("/api/teacher", (req, res, next) => {
     if (!(0, classroom_1.secretsMatch)(req.header("x-teacher-key"), process.env.TEACHER_KEY || "")) {
         res.status(401).json({ error: "Invalid teacher key." });
@@ -48,11 +82,11 @@ app.post("/api/teacher/review", (req, res) => {
 });
 app.post("/api/teacher/mute", (req, res) => {
     var _a, _b;
-    if (typeof ((_a = req.body) === null || _a === void 0 ? void 0 : _a.sessionId) !== "string" || typeof ((_b = req.body) === null || _b === void 0 ? void 0 : _b.muted) !== "boolean") {
-        res.status(400).json({ error: "Provide a session ID and muted value." });
+    if (typeof ((_a = req.body) === null || _a === void 0 ? void 0 : _a.studentKey) !== "string" || typeof ((_b = req.body) === null || _b === void 0 ? void 0 : _b.muted) !== "boolean") {
+        res.status(400).json({ error: "Provide a student key and muted value." });
         return;
     }
-    classroom_1.classroom.setMuted(req.body.sessionId, req.body.muted);
+    classroom_1.classroom.setMuted(req.body.studentKey, req.body.muted);
     res.json(classroom_1.classroom.status());
 });
 const gameServer = new colyseus_1.Server({

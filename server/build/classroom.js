@@ -40,10 +40,10 @@ class Classroom {
         this.pending = new Map();
         this.muted = new Set();
     }
-    submit(sessionId, sender, text, publish, notify) {
+    submit(studentKey, sender, text, publish, notify) {
         const problem = chatProblem(text);
         const entry = {
-            id: (0, crypto_1.randomUUID)(), sessionId, sender, text: text.trim(), timestamp: Date.now(),
+            id: (0, crypto_1.randomUUID)(), studentKey, sender, text: text.trim(), timestamp: Date.now(),
             status: problem ? "blocked" : "pending"
         };
         this.entries.push(entry);
@@ -69,23 +69,24 @@ class Classroom {
         return true;
     }
     setOpen(open) {
-        var _a;
         this.open = open;
         if (!open) {
             for (const entry of this.entries)
                 if (entry.status === "pending") {
                     entry.status = "rejected";
-                    (_a = this.pending.get(entry.id)) === null || _a === void 0 ? void 0 : _a.notify(false);
+                    const pending = this.pending.get(entry.id);
+                    if (pending)
+                        pending.notify(false);
                 }
             this.pending.clear();
         }
     }
-    isMuted(sessionId) { return this.muted.has(sessionId); }
-    setMuted(sessionId, muted) {
+    isMuted(studentKey) { return this.muted.has(studentKey); }
+    setMuted(studentKey, muted) {
         if (muted)
-            this.muted.add(sessionId);
+            this.muted.add(studentKey);
         else
-            this.muted.delete(sessionId);
+            this.muted.delete(studentKey);
     }
     status() {
         return { open: this.open, entries: this.entries.slice().reverse(), muted: [...this.muted] };

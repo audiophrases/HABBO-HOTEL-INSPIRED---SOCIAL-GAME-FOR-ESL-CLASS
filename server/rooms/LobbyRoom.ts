@@ -1,14 +1,16 @@
 import { Room, Client } from "colyseus";
 import { LobbyState, Player } from "./schema/LobbyState";
 import { chatProblem, classroom, secretsMatch, validUsername } from "../classroom";
+import { PinPlayStudent, resolveStudent } from "../pinplay";
 
 export class LobbyRoom extends Room<LobbyState> {
     maxClients = 100;
     private lastChat = new Map<string, number>();
+    private playerKeys = new Map<string, string>();
 
-    onAuth(_client: Client, options: any) {
-        return classroom.open && secretsMatch(options?.pin, process.env.CLASS_PIN || "")
-            && validUsername(options?.username);
+    async onAuth(_client: Client, options: any) {
+        if (!classroom.open || !secretsMatch(options?.pin, process.env.CLASS_PIN || "")) return false;
+        return resolveStudent(options?.studentToken);
     }
 
     onCreate(_options: any) {
@@ -36,24 +38,26 @@ export class LobbyRoom extends Room<LobbyState> {
         this.onMessage("chat", (client, data) => {
             const player = this.state.players.get(client.sessionId);
             if (!player) return;
+            const studentKey = this.playerKeys.get(client.sessionId);
+            if (!studentKey) return;
 
-            if (!classroom.open || classroom.isMuted(client.sessionId)) {
+            if (!classroom.open || classroom.isMuted(studentKey)) {
                 client.send("chat_warning", { message: "Chat is unavailable right now." });
                 return;
             }
             const now = Date.now();
-            if (now - (this.lastChat.get(client.sessionId) || 0) < 1500) {
+            if (now - (this.lastChat.get(studentKey) || 0) < 1500) {
                 client.send("chat_warning", { message: "Please wait before sending another message." });
                 return;
             }
-            this.lastChat.set(client.sessionId, now);
+            this.lastChat.set(studentKey, now);
             const problem = chatProblem(data?.text);
             if (problem && typeof data?.text !== "string") {
                 client.send("chat_warning", { message: problem });
                 return;
             }
             const text = (data.text as string).trim();
-            const entry = classroom.submit(client.sessionId, player.username, text, () => {
+            const entry = classroom.submit(studentKey, player.username, text, () => {
                 if (this.state.players.has(client.sessionId)) {
                     this.broadcast("chat_message", { sender: player.username, text, timestamp: Date.now() });
                 }
@@ -68,11 +72,14 @@ export class LobbyRoom extends Room<LobbyState> {
         });
     }
 
-    onJoin(client: Client, options: any) {
+    onJoin(client: Client, options: any, auth?: PinPlayStudent) {
+        if (!auth) throw new Error("Verified student identity is required.");
         console.log(client.sessionId, "joined!");
         
         const player = new Player();
-        player.username = options.username.trim();
+        const displayName = auth.displayName.replace(/[^\p{L}\p{N} _-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 24);
+        player.username = validUsername(displayName) ? displayName : "Student";
+        this.playerKeys.set(client.sessionId, auth.studentKey);
         player.x = 700 + (Math.random() * 100 - 50);
         player.y = 700 + (Math.random() * 100 - 50);
         
@@ -107,7 +114,7 @@ export class LobbyRoom extends Room<LobbyState> {
             });
         }
         this.state.players.delete(client.sessionId);
-        this.lastChat.delete(client.sessionId);
+        this.playerKeys.delete(client.sessionId);
     }
 
     onDispose() {

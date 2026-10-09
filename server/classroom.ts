@@ -3,7 +3,7 @@ import { randomUUID, timingSafeEqual } from "crypto";
 export type ReviewStatus = "pending" | "approved" | "rejected" | "blocked";
 export type ChatEntry = {
     id: string;
-    sessionId: string;
+    studentKey: string;
     sender: string;
     text: string;
     timestamp: number;
@@ -45,11 +45,11 @@ export class Classroom {
     private pending = new Map<string, { publish: () => void; notify: (approved: boolean) => void }>();
     private muted = new Set<string>();
 
-    submit(sessionId: string, sender: string, text: string, publish: () => void,
+    submit(studentKey: string, sender: string, text: string, publish: () => void,
         notify: (approved: boolean) => void): ChatEntry {
         const problem = chatProblem(text);
         const entry: ChatEntry = {
-            id: randomUUID(), sessionId, sender, text: text.trim(), timestamp: Date.now(),
+            id: randomUUID(), studentKey, sender, text: text.trim(), timestamp: Date.now(),
             status: problem ? "blocked" : "pending"
         };
         this.entries.push(entry);
@@ -77,16 +77,17 @@ export class Classroom {
         if (!open) {
             for (const entry of this.entries) if (entry.status === "pending") {
                 entry.status = "rejected";
-                this.pending.get(entry.id)?.notify(false);
+                const pending = this.pending.get(entry.id);
+                if (pending) pending.notify(false);
             }
             this.pending.clear();
         }
     }
 
-    isMuted(sessionId: string): boolean { return this.muted.has(sessionId); }
-    setMuted(sessionId: string, muted: boolean): void {
-        if (muted) this.muted.add(sessionId);
-        else this.muted.delete(sessionId);
+    isMuted(studentKey: string): boolean { return this.muted.has(studentKey); }
+    setMuted(studentKey: string, muted: boolean): void {
+        if (muted) this.muted.add(studentKey);
+        else this.muted.delete(studentKey);
     }
     status() {
         return { open: this.open, entries: this.entries.slice().reverse(), muted: [...this.muted] };

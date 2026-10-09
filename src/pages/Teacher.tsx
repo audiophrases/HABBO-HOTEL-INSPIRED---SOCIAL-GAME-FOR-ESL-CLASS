@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { serverUrl } from '../config';
 import './Teacher.css';
 
-type Entry = { id: string; sessionId: string; sender: string; text: string; timestamp: number; status: string };
+type Entry = { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string };
 type Status = { open: boolean; entries: Entry[]; muted: string[] };
 
 export default function Teacher() {
@@ -66,8 +66,8 @@ export default function Teacher() {
               <button onClick={() => void action('review', { id: entry.id, approve: true })}>Approve</button>
               <button onClick={() => void action('review', { id: entry.id, approve: false })}>Reject</button>
             </>}
-            <button onClick={() => void action('mute', { sessionId: entry.sessionId, muted: !status.muted.includes(entry.sessionId) })}>
-              {status.muted.includes(entry.sessionId) ? 'Unmute' : 'Mute'} connection
+            <button onClick={() => void action('mute', { studentKey: entry.studentKey, muted: !status.muted.includes(entry.studentKey) })}>
+              {status.muted.includes(entry.studentKey) ? 'Unmute' : 'Mute'} student
             </button>
           </div>
         </article>)}

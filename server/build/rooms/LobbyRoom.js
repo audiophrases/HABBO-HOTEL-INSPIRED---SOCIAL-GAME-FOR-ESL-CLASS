@@ -4,15 +4,18 @@ exports.LobbyRoom = void 0;
 const colyseus_1 = require("colyseus");
 const LobbyState_1 = require("./schema/LobbyState");
 const classroom_1 = require("../classroom");
+const pinplay_1 = require("../pinplay");
 class LobbyRoom extends colyseus_1.Room {
     constructor() {
         super(...arguments);
         this.maxClients = 100;
         this.lastChat = new Map();
+        this.playerKeys = new Map();
     }
-    onAuth(_client, options) {
-        return classroom_1.classroom.open && (0, classroom_1.secretsMatch)(options === null || options === void 0 ? void 0 : options.pin, process.env.CLASS_PIN || "")
-            && (0, classroom_1.validUsername)(options === null || options === void 0 ? void 0 : options.username);
+    async onAuth(_client, options) {
+        if (!classroom_1.classroom.open || !(0, classroom_1.secretsMatch)(options === null || options === void 0 ? void 0 : options.pin, process.env.CLASS_PIN || ""))
+            return false;
+        return (0, pinplay_1.resolveStudent)(options === null || options === void 0 ? void 0 : options.studentToken);
     }
     onCreate(_options) {
         console.log("LobbyRoom created!");
@@ -37,23 +40,26 @@ class LobbyRoom extends colyseus_1.Room {
             const player = this.state.players.get(client.sessionId);
             if (!player)
                 return;
-            if (!classroom_1.classroom.open || classroom_1.classroom.isMuted(client.sessionId)) {
+            const studentKey = this.playerKeys.get(client.sessionId);
+            if (!studentKey)
+                return;
+            if (!classroom_1.classroom.open || classroom_1.classroom.isMuted(studentKey)) {
                 client.send("chat_warning", { message: "Chat is unavailable right now." });
                 return;
             }
             const now = Date.now();
-            if (now - (this.lastChat.get(client.sessionId) || 0) < 1500) {
+            if (now - (this.lastChat.get(studentKey) || 0) < 1500) {
                 client.send("chat_warning", { message: "Please wait before sending another message." });
                 return;
             }
-            this.lastChat.set(client.sessionId, now);
+            this.lastChat.set(studentKey, now);
             const problem = (0, classroom_1.chatProblem)(data === null || data === void 0 ? void 0 : data.text);
             if (problem && typeof (data === null || data === void 0 ? void 0 : data.text) !== "string") {
                 client.send("chat_warning", { message: problem });
                 return;
             }
             const text = data.text.trim();
-            const entry = classroom_1.classroom.submit(client.sessionId, player.username, text, () => {
+            const entry = classroom_1.classroom.submit(studentKey, player.username, text, () => {
                 if (this.state.players.has(client.sessionId)) {
                     this.broadcast("chat_message", { sender: player.username, text, timestamp: Date.now() });
                 }
@@ -67,10 +73,14 @@ class LobbyRoom extends colyseus_1.Room {
             });
         });
     }
-    onJoin(client, options) {
+    onJoin(client, options, auth) {
+        if (!auth)
+            throw new Error("Verified student identity is required.");
         console.log(client.sessionId, "joined!");
         const player = new LobbyState_1.Player();
-        player.username = options.username.trim();
+        const displayName = auth.displayName.replace(/[^\p{L}\p{N} _-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 24);
+        player.username = (0, classroom_1.validUsername)(displayName) ? displayName : "Student";
+        this.playerKeys.set(client.sessionId, auth.studentKey);
         player.x = 700 + (Math.random() * 100 - 50);
         player.y = 700 + (Math.random() * 100 - 50);
         if (options.avatarConfig) {
@@ -101,7 +111,7 @@ class LobbyRoom extends colyseus_1.Room {
             });
         }
         this.state.players.delete(client.sessionId);
-        this.lastChat.delete(client.sessionId);
+        this.playerKeys.delete(client.sessionId);
     }
     onDispose() {
         console.log("Room disposed");
