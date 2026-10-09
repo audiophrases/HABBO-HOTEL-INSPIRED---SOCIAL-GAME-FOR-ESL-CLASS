@@ -1,0 +1,34 @@
+# Project Summary: Habbo-Inspired ESL Social Game
+
+## Core Concept
+A Habbo Hotel-inspired web app game designed specifically for ESL (English as a Second Language) students. The game focuses on social interaction and language immersion in a safe, controlled environment.
+
+## Visual Style & Setting
+- **Aesthetic:** Classic, nostalgic isometric pixel art (2D that looks 3D).
+- **Environment:** Originally conceived as a hotel, currently leaning towards a virtual town with various buildings (e.g., a lobby, nightclub, restaurant, rooms). 
+- **Naming Ideas:** "Pixel Plaza", "The Grand", "The Lobby" (avoiding overly educational names like "ESL Hotel" to maintain the video game feel).
+
+## Gameplay & Features
+- **Social Focus:** Free-roaming avatars, room decoration, and chatting via speech bubbles.
+- **Persistence:** Student progress (avatar looks, decorated rooms, items) is saved across sessions.
+- **Access:** Played exclusively during class time on school-managed laptops.
+
+## Language Immersion & Restrictions
+- **English-Only:** Students are forced to communicate in English.
+- **Anti-Translation Measures:** Copy-paste functionality will be disabled within the app to discourage the use of translation tools.
+
+## Chat System & Moderation (Crucial for Safety)
+- **Chat Types:** 
+  - Proximity chat (visible only to those nearby).
+  - Whisper (one-to-one private chat among students).
+- **Total Teacher Visibility:** The teacher (admin) has full visibility of ALL chats, including whispers. Students are made aware of this transparency.
+- **Filtering & AI Moderation:**
+  - Messages must pass a dictionary filter (uncensored words only) and strict ban on curse words.
+  - AI moderation checks the context of messages to prevent bullying and toxic behavior before the message is posted.
+  - Live teacher dashboard for monitoring and applying warnings/bans.
+
+## Proposed Tech Stack (Initial Ideas)
+- **Frontend/Game Engine:** Phaser (web game engine), Tiled (tilemap editor), Aseprite (sprites).
+- **Backend/Multiplayer:** Colyseus (multiplayer syncing).
+- **Database:** Supabase (for persistent student state).
+- **Moderation:** OpenAI Moderation endpoint + custom dictionary filtering.
