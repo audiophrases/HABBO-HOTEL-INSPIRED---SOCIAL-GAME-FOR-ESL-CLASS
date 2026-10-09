@@ -49,5 +49,5 @@ export function renderAvatarSvg(avatar: Partial<AvatarConfig> = {}): string {
     .replace(/#00FFFF/gi, skinColor)
     .replace(/#FF00FF/gi, hairColorHex);
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${data.viewBox}">${coloredBody}</svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${data.viewBox}" width="100" height="104">${coloredBody}</svg>`;
 }

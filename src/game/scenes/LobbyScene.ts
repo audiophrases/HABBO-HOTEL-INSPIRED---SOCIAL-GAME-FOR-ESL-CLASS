@@ -21,18 +21,26 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   preload() {
-    // Basic loading
+    this.load.image('plaza_bg', '/assets/plaza.jpg');
   }
 
   create() {
-    this.add.grid(0, 0, 4000, 4000, 32, 32, 0x00A699, 0.2, 0x00A699, 0.4).setOrigin(0,0);
-    this.physics.world.setBounds(0, 0, 4000, 4000);
+    // Add the background image
+    const bg = this.add.image(0, 0, 'plaza_bg').setOrigin(0, 0);
+    
+    // Scale image to a reasonable size (not 4000x4000 which makes it too zoomed in)
+    bg.setScale(2); // 2x scale makes it 2048x2048 if it was 1024x1024
+    
+    const mapWidth = bg.displayWidth;
+    const mapHeight = bg.displayHeight;
+    
+    this.physics.world.setBounds(0, 0, mapWidth, mapHeight);
 
     if (this.input.keyboard) {
       this.cursors = this.input.keyboard.createCursorKeys();
     }
     
-    this.cameras.main.setBounds(0, 0, 4000, 4000);
+    this.cameras.main.setBounds(0, 0, mapWidth, mapHeight);
 
     this.room.state.players.onAdd((player: any, sessionId: string) => {
       const isLocal = (sessionId === this.room.sessionId);

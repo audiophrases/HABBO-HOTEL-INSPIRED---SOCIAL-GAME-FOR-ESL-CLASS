@@ -20,6 +20,7 @@ export default function PhaserGame({ username, room }: PhaserGameProps) {
       width: '100%',
       height: '100%',
       parent: gameRef.current,
+      pixelArt: true,
       physics: {
         default: 'arcade',
         arcade: {
