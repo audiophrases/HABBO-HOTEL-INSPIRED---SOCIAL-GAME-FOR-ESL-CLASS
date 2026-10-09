@@ -1,7 +1,9 @@
-import { serverUrl } from './config';
+import type { AvatarConfig } from './utils/AvatarRenderer';
 
 export type Student = { studentKey: string; displayName: string; className: string };
 export type StudentSession = { studentToken: string; expiresAt: number; student: Student };
+// The avatar saved in the plaza, or null before the student's first visit.
+export type StudentProfile = { student: Student; avatar: AvatarConfig | null };
 export type StudentConfig = { loginEnabled: boolean; googleClientId: string; allowedDomains: string[] };
 
 const sessionKey = 'pixelplaza.student.v1';
@@ -26,7 +28,7 @@ export function clearStudentSession(): void {
 }
 
 async function studentRequest<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${serverUrl}/api/student/${path}`, init);
+  const response = await fetch(`/api/student/${path}`, init);
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || 'Student sign-in failed.');
   return result as T;
@@ -36,12 +38,12 @@ export function fetchStudentConfig(): Promise<StudentConfig> {
   return studentRequest<StudentConfig>('config');
 }
 
-export function fetchStudentProfile(token: string): Promise<{ student: Student }> {
-  return studentRequest<{ student: Student }>('me', { headers: { 'x-student-token': token } });
+export function fetchStudentProfile(token: string): Promise<StudentProfile> {
+  return studentRequest<StudentProfile>('me', { headers: { 'x-student-token': token } });
 }
 
-export function exchangeGoogleCredential(googleIdToken: string): Promise<StudentSession> {
-  return studentRequest<StudentSession>('login', {
+export function exchangeGoogleCredential(googleIdToken: string): Promise<StudentSession & StudentProfile> {
+  return studentRequest<StudentSession & StudentProfile>('login', {
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ googleIdToken })
   });

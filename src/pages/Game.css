@@ -45,6 +45,10 @@
   margin-left: 10px;
 }
 
+.badge-status {
+  background: #8a6d1f;
+}
+
 .chat-container {
   width: 100%;
   max-width: 450px;

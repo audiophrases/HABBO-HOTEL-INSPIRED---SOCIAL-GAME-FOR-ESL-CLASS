@@ -1,14 +1,13 @@
 import { useEffect, useRef } from 'react';
 import Phaser from 'phaser';
-import * as Colyseus from 'colyseus.js';
+import type { PlazaConnection } from '../plaza';
 import LobbyScene from '../game/scenes/LobbyScene';
 
 interface PhaserGameProps {
-  username: string;
-  room: Colyseus.Room;
+  connection: PlazaConnection;
 }
 
-export default function PhaserGame({ username, room }: PhaserGameProps) {
+export default function PhaserGame({ connection }: PhaserGameProps) {
   const gameRef = useRef<HTMLDivElement>(null);
   const phaserGameRef = useRef<Phaser.Game | null>(null);
 
@@ -38,14 +37,13 @@ export default function PhaserGame({ username, room }: PhaserGameProps) {
 
     phaserGameRef.current = new Phaser.Game(config);
     
-    // Pass username and the active Colyseus room to the scene
-    phaserGameRef.current.scene.start('LobbyScene', { username, room });
+    phaserGameRef.current.scene.start('LobbyScene', { connection });
 
     return () => {
       phaserGameRef.current?.destroy(true);
       phaserGameRef.current = null;
     };
-  }, [username, room]);
+  }, [connection]);
 
   return <div ref={gameRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0, zIndex: 0 }} />;
 }

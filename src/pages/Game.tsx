@@ -1,15 +1,15 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import * as Colyseus from 'colyseus.js';
 import PhaserGame from '../components/PhaserGame';
-import { websocketUrl } from '../config';
+import { PlazaConnection } from '../plaza';
+import type { PlazaStatus } from '../plaza';
 import { readStudentSession } from '../studentAuth';
 import type { AvatarConfig } from '../utils/AvatarRenderer';
 import './Game.css';
 
 interface GameState {
   roomCode: string;
-  avatarConfig: AvatarConfig;
+  avatarConfig: AvatarConfig | null; // null keeps the saved avatar
 }
 
 interface ChatMessage {
@@ -26,8 +26,8 @@ export default function Game() {
   
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
-  const [connectedRoom, setConnectedRoom] = useState<Colyseus.Room | null>(null);
-  const roomRef = useRef<Colyseus.Room | null>(null);
+  const [connection, setConnection] = useState<PlazaConnection | null>(null);
+  const [status, setStatus] = useState<PlazaStatus>({ state: 'connecting' });
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -36,41 +36,22 @@ export default function Game() {
       return;
     }
 
-    const connectColyseus = async () => {
-      try {
-        const client = new Colyseus.Client(websocketUrl);
-        const room = await client.joinOrCreate('lobby', { 
-          pin: state.roomCode,
-          studentToken: session.studentToken,
-          avatarConfig: state.avatarConfig
-        });
-        roomRef.current = room;
-        setConnectedRoom(room);
-
-        room.onMessage('chat_message', (message: ChatMessage) => {
-          setMessages(prev => [...prev, message]);
-        });
-
-        room.onMessage('chat_warning', (warning: { message: string }) => {
-          setMessages(prev => [...prev, { sender: 'System Warning', text: warning.message }]);
-        });
-        room.onMessage('chat_pending', (notice: { message: string }) => {
-          setMessages(prev => [...prev, { sender: 'System', text: notice.message }]);
-        });
-        room.onMessage('chat_decision', (notice: { message: string }) => {
-          setMessages(prev => [...prev, { sender: 'System', text: notice.message }]);
-        });
-
-      } catch (e) {
-        console.error("Colyseus Connection Error:", e);
-        setMessages(prev => [...prev, { sender: 'System Warning', text: 'Could not join. Check your class PIN and Google sign-in, and ask your teacher to open the class.' }]);
-      }
-    };
-
-    connectColyseus();
+    const plaza = new PlazaConnection(state.roomCode, session.studentToken, state.avatarConfig);
+    const say = (message: ChatMessage) => setMessages(prev => [...prev, message]);
+    const unsubscribe = plaza.subscribe(event => {
+      if (event.t === 'chat') say({ sender: event.sender, text: event.text, timestamp: event.ts });
+      else if (event.t === 'notice') say({ sender: event.level === 'warning' ? 'System Warning' : 'System', text: event.text });
+    });
+    const unwatch = plaza.onStatus(next => {
+      setStatus(next);
+      if (next.state === 'online') setConnection(plaza); // the map appears once connected
+      if (next.state === 'stopped' && next.message) say({ sender: 'System Warning', text: next.message });
+    });
 
     return () => {
-      roomRef.current?.leave();
+      unsubscribe();
+      unwatch();
+      plaza.close();
     };
   }, [state, session, navigate]);
 
@@ -83,11 +64,11 @@ export default function Game() {
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!chatInput.trim() || !roomRef.current) return;
-    
+    if (!chatInput.trim() || !connection) return;
+
     // Send message to the server for moderation
-    roomRef.current.send('chat', { text: chatInput });
-    setChatInput('');
+    if (connection.send({ t: 'chat', text: chatInput })) setChatInput('');
+    else setMessages(prev => [...prev, { sender: 'System Warning', text: 'Not connected. Try again in a moment.' }]);
   };
 
   const handlePreventClipboard = (e: React.ClipboardEvent) => {
@@ -97,7 +78,7 @@ export default function Game() {
   return (
     <div className="game-container">
       {/* Background Phaser Canvas */}
-      {connectedRoom && <PhaserGame username={session.student.displayName} room={connectedRoom} />}
+      {connection && <PhaserGame connection={connection} />}
       
       {/* React UI Overlay */}
       <div className="ui-layer">
@@ -107,6 +88,9 @@ export default function Game() {
             <span className="badge">Room: Lobby</span>
             <span className="badge">{session.student.displayName}</span>
             {state.roomCode && <span className="badge">Class: {state.roomCode}</span>}
+            {status.state !== 'online' && <span className="badge badge-status">
+              {status.state === 'stopped' ? 'Disconnected' : status.state === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+            </span>}
           </div>
         </header>
 
@@ -130,7 +114,7 @@ export default function Game() {
               <button 
                 key={emote} 
                 className="emote-btn" 
-                onClick={() => roomRef.current?.send('emote', { emote })}
+                onClick={() => connection?.send({ t: 'emote', emote })}
                 title={`Send ${emote} emote`}
               >
                 {emote}

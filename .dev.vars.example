@@ -1,0 +1,7 @@
+# Copy to .dev.vars for `npm run dev:worker`. Never commit .dev.vars.
+CLASS_PIN=123456
+# lowercase-hex SHA-256 of the NFC-normalised teacher password, the same scheme as PinPlay:
+# node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1].trim().normalize('NFC')).digest('hex'))" "your password"
+CREATE_PASSWORD_HASH=
+# Local only: reach PinPlay over HTTPS instead of the service binding.
+PINPLAY_API_URL=https://api.pinplay.win

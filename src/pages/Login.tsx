@@ -15,6 +15,8 @@ export default function Login() {
   const [pin, setPin] = useState('');
   const [session, setSession] = useState<StudentSession | null>(() => readStudentSession());
   const [config, setConfig] = useState<StudentConfig | null>(null);
+  // Saved in the plaza: a returning student walks straight in looking the same.
+  const [savedAvatar, setSavedAvatar] = useState<AvatarConfig | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const googleButton = useRef<HTMLDivElement>(null);
@@ -26,11 +28,12 @@ export default function Login() {
       .catch(cause => { if (active) setError(cause instanceof Error ? cause.message : 'Could not load sign-in settings.'); });
     const saved = readStudentSession();
     if (saved) {
-      void fetchStudentProfile(saved.studentToken).then(({ student }) => {
+      void fetchStudentProfile(saved.studentToken).then(({ student, avatar }) => {
         if (active) {
           const updated = { ...saved, student };
           saveStudentSession(updated);
           setSession(updated);
+          setSavedAvatar(avatar);
         }
       }).catch(() => {
         if (active) { clearStudentSession(); setSession(null); }
@@ -46,8 +49,8 @@ export default function Login() {
       if (!active) return;
       setBusy(true);
       setError('');
-      void exchangeGoogleCredential(credential).then(value => {
-        if (active) { saveStudentSession(value); setSession(value); }
+      void exchangeGoogleCredential(credential).then(({ avatar, ...value }) => {
+        if (active) { saveStudentSession(value); setSession(value); setSavedAvatar(avatar); }
       }).catch(cause => {
         if (active) setError(cause instanceof Error ? cause.message : 'Google sign-in failed.');
       }).finally(() => { if (active) setBusy(false); });
@@ -57,9 +60,11 @@ export default function Login() {
     return () => { active = false; };
   }, [config, session, step]);
 
-  const handleAvatarSave = (avatarConfig: AvatarConfig) => {
+  // A null avatar keeps the saved one.
+  const enter = (avatarConfig: AvatarConfig | null) => {
     if (session) navigate('/game', { state: { roomCode: pin, avatarConfig } });
   };
+  const ready = !!session && /^\d{4,8}$/.test(pin);
 
   return (
     <div className="login-wrapper" style={{ backgroundImage: 'url(/background.jpg)' }}>
@@ -73,7 +78,9 @@ export default function Login() {
           {step === 'details' ? (
             <form className="login-form" onSubmit={event => {
               event.preventDefault();
-              if (session && /^\d{4,8}$/.test(pin)) setStep('avatar');
+              if (!ready) return;
+              if (savedAvatar) enter(null);
+              else setStep('avatar');
             }}>
               <h2 className="card-title">Join your class</h2>
               <div className="input-group">
@@ -87,7 +94,7 @@ export default function Login() {
                   <p>Signed in as <strong>{session.student.displayName}</strong>
                     {session.student.className ? ` (${session.student.className})` : ''}</p>
                   <button className="link-btn" type="button" onClick={() => {
-                    clearStudentSession(); setSession(null); setStep('details');
+                    clearStudentSession(); setSession(null); setSavedAvatar(null); setStep('details');
                   }}>Not you? Sign out</button>
                 </> : <>
                   <p>Sign in with your PinPlay Google account.</p>
@@ -96,9 +103,13 @@ export default function Login() {
                 </>}
               </div>
               {error && <p role="alert" className="login-error">{error}</p>}
-              <button className="btn btn-primary login-btn" type="submit" disabled={!session || busy}>Choose your avatar</button>
+              <button className="btn btn-primary login-btn" type="submit" disabled={!session || busy}>
+                {savedAvatar ? 'Enter the Plaza' : 'Choose your avatar'}
+              </button>
+              {savedAvatar && <button className="link-btn" type="button" disabled={!ready || busy}
+                onClick={() => setStep('avatar')}>Change my looks</button>}
             </form>
-          ) : <AvatarEditor onSave={handleAvatarSave} onCancel={() => setStep('details')} />}
+          ) : <AvatarEditor initialConfig={savedAvatar ?? undefined} onSave={enter} onCancel={() => setStep('details')} />}
           <p className="login-notice">Your teacher can review every message. Messages appear after teacher approval.</p>
           <Link className="teacher-link" to="/teacher">Teacher controls</Link>
         </div>

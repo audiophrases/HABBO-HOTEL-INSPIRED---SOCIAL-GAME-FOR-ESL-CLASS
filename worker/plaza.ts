@@ -1,0 +1,270 @@
+import { DurableObject } from 'cloudflare:workers';
+import type { Env } from './index.ts';
+import type { PinPlayStudent } from './pinplay.ts';
+import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar } from './rules.ts';
+
+const TICKET_MS = 60_000;
+const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
+const CHAT_KEEP = 500;
+const STATUS_HISTORY = 100;
+const CHAT_GAP_MS = 1500;
+
+// Close codes the client acts on.
+const CLOSE_JOIN_AGAIN = 4001; // ticket unknown, used or expired
+const CLOSE_REPLACED = 4009;   // the same student joined from another window
+
+// Per-socket state. It lives in the socket's attachment, so it survives the
+// room hibernating between messages.
+type Seat = { id: string; studentKey: string; name: string; avatar: Avatar; x: number; y: number; lastChat: number; left?: boolean };
+
+export type TeacherAction =
+    | { kind: 'status' }
+    | { kind: 'open'; open: boolean }
+    | { kind: 'review'; id: string; approve: boolean }
+    | { kind: 'mute'; studentKey: string; muted: boolean };
+
+export type TeacherStatus = {
+    open: boolean;
+    entries: { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string }[];
+    muted: string[];
+    online: { studentKey: string; name: string }[];
+};
+
+const publicSeat = (seat: Seat) => ({ id: seat.id, name: seat.name, x: seat.x, y: seat.y, ...seat.avatar });
+
+// The class's plaza. Everything that must outlast a lesson is a SQLite row:
+// each student's looks and last position, the chat log, mutes, and whether the
+// class is open. Who is online right now is the set of open sockets.
+export class PlazaRoom extends DurableObject<Env> {
+    private sql: SqlStorage;
+
+    constructor(ctx: DurableObjectState, env: Env) {
+        super(ctx, env);
+        this.sql = ctx.storage.sql;
+        this.sql.exec(`
+            CREATE TABLE IF NOT EXISTS students (
+                student_key TEXT PRIMARY KEY, name TEXT NOT NULL, class_name TEXT NOT NULL DEFAULT '',
+                avatar TEXT, x REAL, y REAL, first_seen INTEGER NOT NULL, last_seen INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS tickets (ticket TEXT PRIMARY KEY, student_key TEXT NOT NULL, expires INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS chat (
+                id TEXT PRIMARY KEY, student_key TEXT NOT NULL, sender TEXT NOT NULL,
+                text TEXT NOT NULL, ts INTEGER NOT NULL, status TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS chat_ts ON chat (ts);
+            CREATE INDEX IF NOT EXISTS chat_status ON chat (status);
+            CREATE TABLE IF NOT EXISTS mutes (student_key TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS teacher_sessions (token TEXT PRIMARY KEY, expires INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+        // Keepalive pings are answered without waking the room.
+        ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair('ping', 'pong'));
+    }
+
+    // ---------- Called by the Worker ----------
+
+    savedAvatar(studentKey: string): Avatar | null {
+        const row = this.sql.exec<{ avatar: string | null }>('SELECT avatar FROM students WHERE student_key = ?', studentKey).toArray()[0];
+        return row?.avatar ? sanitizeAvatar(JSON.parse(row.avatar)) : null;
+    }
+
+    // A verified student gets a one-use ticket for the socket, which cannot
+    // carry headers. A null avatar keeps the saved one.
+    issueTicket(student: PinPlayStudent, avatar: Avatar | null): { ticket: string } | { error: string } {
+        if (!this.isOpen()) return { error: 'Your teacher has not opened the class yet.' };
+        const now = Date.now();
+        const ticket = crypto.randomUUID();
+        this.sql.exec(`INSERT INTO students (student_key, name, class_name, avatar, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT (student_key) DO UPDATE SET name = excluded.name, class_name = excluded.class_name,
+                avatar = COALESCE(excluded.avatar, students.avatar), last_seen = excluded.last_seen`,
+            student.studentKey, plazaName(student.displayName), student.className,
+            avatar ? JSON.stringify(avatar) : null, now, now);
+        this.sql.exec('DELETE FROM tickets WHERE expires < ?', now);
+        this.sql.exec('INSERT INTO tickets (ticket, student_key, expires) VALUES (?, ?, ?)', ticket, student.studentKey, now + TICKET_MS);
+        return { ticket };
+    }
+
+    startTeacherSession(): string {
+        const now = Date.now();
+        const token = crypto.randomUUID() + crypto.randomUUID();
+        this.sql.exec('DELETE FROM teacher_sessions WHERE expires < ?', now);
+        this.sql.exec('INSERT INTO teacher_sessions (token, expires) VALUES (?, ?)', token, now + TEACHER_SESSION_MS);
+        return token;
+    }
+
+    teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
+        const session = this.sql.exec('SELECT 1 FROM teacher_sessions WHERE token = ? AND expires > ?', token, Date.now()).toArray();
+        if (!token || session.length === 0) return { error: 'Please sign in again.', status: 401 };
+        if (action.kind === 'open') this.setOpen(action.open);
+        if (action.kind === 'review' && !this.review(action.id, action.approve)) {
+            return { error: 'That message is no longer pending.', status: 400 };
+        }
+        if (action.kind === 'mute') {
+            if (action.muted) this.sql.exec('INSERT OR IGNORE INTO mutes (student_key) VALUES (?)', action.studentKey);
+            else this.sql.exec('DELETE FROM mutes WHERE student_key = ?', action.studentKey);
+        }
+        // The dashboard polls every 2 seconds: send everything still pending plus
+        // recent history, read through the indexes, not the whole log each time.
+        return {
+            open: this.isOpen(),
+            entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, text,
+                ts AS timestamp, status FROM (
+                    SELECT * FROM chat WHERE status = 'pending'
+                    UNION SELECT * FROM (SELECT * FROM chat ORDER BY ts DESC LIMIT ?))
+                ORDER BY ts DESC`, STATUS_HISTORY).toArray(),
+            muted: this.sql.exec<{ student_key: string }>('SELECT student_key FROM mutes').toArray().map(row => row.student_key),
+            online: this.seats().map(seat => ({ studentKey: seat.studentKey, name: seat.name }))
+        };
+    }
+
+    // ---------- The plaza socket ----------
+
+    async fetch(request: Request): Promise<Response> {
+        const { 0: client, 1: server } = new WebSocketPair();
+        const ticket = new URL(request.url).searchParams.get('ticket') || '';
+        const row = this.sql.exec<{ student_key: string }>(
+            'DELETE FROM tickets WHERE ticket = ? AND expires >= ? RETURNING student_key', ticket, Date.now()).toArray()[0];
+        if (!row || !this.isOpen()) {
+            server.accept();
+            server.close(CLOSE_JOIN_AGAIN, 'Join again.');
+            return new Response(null, { status: 101, webSocket: client });
+        }
+
+        // One avatar per student: a newer window takes over, where the older one stood.
+        const replaced = this.ctx.getWebSockets(row.student_key).filter(ws => !(ws.deserializeAttachment() as Seat | null)?.left);
+        for (const old of replaced) {
+            this.leave(old, false);
+            try { old.close(CLOSE_REPLACED, 'Opened in another window.'); } catch { /* already closing */ }
+        }
+
+        const saved = this.sql.exec<{ name: string; avatar: string | null; x: number | null; y: number | null }>(
+            'SELECT name, avatar, x, y FROM students WHERE student_key = ?', row.student_key).one();
+        const seat: Seat = {
+            id: crypto.randomUUID().slice(0, 8), studentKey: row.student_key, name: saved.name,
+            avatar: (saved.avatar && sanitizeAvatar(JSON.parse(saved.avatar))) || defaultAvatar(),
+            x: saved.x ?? SPAWN.x + Math.round(Math.random() * 100 - 50),
+            y: saved.y ?? SPAWN.y + Math.round(Math.random() * 100 - 50),
+            lastChat: 0
+        };
+        const others = this.seats();
+        this.ctx.acceptWebSocket(server, [seat.studentKey]);
+        server.serializeAttachment(seat);
+        server.send(JSON.stringify({ t: 'welcome', id: seat.id, players: [...others, seat].map(publicSeat) }));
+        this.broadcast({ t: 'join', player: publicSeat(seat) }, server);
+        if (replaced.length === 0) this.systemChat(`${seat.name} has joined the Plaza.`, server);
+        return new Response(null, { status: 101, webSocket: client });
+    }
+
+    async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+        if (typeof message !== 'string' || message.length > 1000) return;
+        const seat = ws.deserializeAttachment() as Seat | null;
+        if (!seat || seat.left) return;
+        let data: any;
+        try { data = JSON.parse(message); } catch { return; }
+
+        if (data?.t === 'move') {
+            const position = clampPosition(data.x, data.y);
+            if (!position) return;
+            seat.x = position.x;
+            seat.y = position.y;
+            ws.serializeAttachment(seat);
+            this.broadcast({ t: 'move', id: seat.id, ...position }, ws);
+        } else if (data?.t === 'emote' && EMOTES.includes(data.emote)) {
+            this.broadcast({ t: 'emote', id: seat.id, emote: data.emote });
+        } else if (data?.t === 'chat') {
+            this.chat(ws, seat, data.text);
+        }
+    }
+
+    async webSocketClose(ws: WebSocket, code: number, reason: string): Promise<void> {
+        this.leave(ws, true);
+        try { ws.close(code, reason); } catch { /* reserved code, or already closed */ }
+    }
+
+    async webSocketError(ws: WebSocket): Promise<void> {
+        this.leave(ws, true);
+    }
+
+    // ---------- Internals ----------
+
+    private isOpen(): boolean {
+        return this.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key = 'open'").toArray()[0]?.value === '1';
+    }
+
+    private seats(): Seat[] {
+        return this.ctx.getWebSockets().flatMap(ws => {
+            if (ws.readyState !== WebSocket.READY_STATE_OPEN) return [];
+            const seat = ws.deserializeAttachment() as Seat | null;
+            return seat && !seat.left ? [seat] : [];
+        });
+    }
+
+    private broadcast(message: object, except?: WebSocket): void {
+        const data = JSON.stringify(message);
+        for (const ws of this.ctx.getWebSockets()) {
+            if (ws === except || ws.readyState !== WebSocket.READY_STATE_OPEN) continue;
+            try { ws.send(data); } catch { /* closing */ }
+        }
+    }
+
+    private notify(studentKey: string, level: 'info' | 'warning', text: string): void {
+        for (const ws of this.ctx.getWebSockets(studentKey)) {
+            try { ws.send(JSON.stringify({ t: 'notice', level, text })); } catch { /* closing */ }
+        }
+    }
+
+    private systemChat(text: string, except?: WebSocket): void {
+        this.broadcast({ t: 'chat', sender: 'System', text, ts: Date.now() }, except);
+    }
+
+    // Saves where the student stood, so the next lesson starts there.
+    private leave(ws: WebSocket, announce: boolean): void {
+        const seat = ws.deserializeAttachment() as Seat | null;
+        if (!seat || seat.left) return;
+        seat.left = true;
+        try { ws.serializeAttachment(seat); } catch { /* closed */ }
+        this.sql.exec('UPDATE students SET x = ?, y = ?, last_seen = ? WHERE student_key = ?', seat.x, seat.y, Date.now(), seat.studentKey);
+        this.broadcast({ t: 'leave', id: seat.id }, ws);
+        if (announce) this.systemChat(`${seat.name} left the Plaza.`, ws);
+    }
+
+    private chat(ws: WebSocket, seat: Seat, value: unknown): void {
+        const reply = (level: 'info' | 'warning', text: string) => ws.send(JSON.stringify({ t: 'notice', level, text }));
+        if (!this.isOpen() || this.sql.exec('SELECT 1 FROM mutes WHERE student_key = ?', seat.studentKey).toArray().length) {
+            return reply('warning', 'Chat is unavailable right now.');
+        }
+        const now = Date.now();
+        if (now - seat.lastChat < CHAT_GAP_MS) return reply('warning', 'Please wait before sending another message.');
+        seat.lastChat = now;
+        ws.serializeAttachment(seat);
+        if (typeof value !== 'string') return reply('warning', 'Enter a text message.');
+
+        // Blocked messages are kept too, so the teacher sees what was attempted.
+        const problem = chatProblem(value);
+        this.sql.exec('INSERT INTO chat (id, student_key, sender, text, ts, status) VALUES (?, ?, ?, ?, ?, ?)',
+            crypto.randomUUID(), seat.studentKey, seat.name, value.trim().slice(0, 200), now, problem ? 'blocked' : 'pending');
+        this.sql.exec('DELETE FROM chat WHERE id NOT IN (SELECT id FROM chat ORDER BY ts DESC LIMIT ?)', CHAT_KEEP);
+        reply(problem ? 'warning' : 'info', problem ?? 'Sent to your teacher for approval.');
+    }
+
+    private review(id: string, approve: boolean): boolean {
+        const entry = this.sql.exec<{ student_key: string; sender: string; text: string; status: string }>(
+            'SELECT student_key, sender, text, status FROM chat WHERE id = ?', id).toArray()[0];
+        if (!entry || entry.status !== 'pending') return false;
+        const approved = approve && this.isOpen();
+        this.sql.exec('UPDATE chat SET status = ? WHERE id = ?', approved ? 'approved' : 'rejected', id);
+        if (approved) this.broadcast({ t: 'chat', sender: entry.sender, text: entry.text, ts: Date.now() });
+        this.notify(entry.student_key, 'info', approved ? 'Your message was approved.' : 'Your message was not posted.');
+        return true;
+    }
+
+    // Closing rejects pending chat and stops new joins; students already in stay.
+    private setOpen(open: boolean): void {
+        this.sql.exec("INSERT INTO settings (key, value) VALUES ('open', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            open ? '1' : '0');
+        if (open) return;
+        const rejected = this.sql.exec<{ student_key: string }>(
+            "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();
+        for (const studentKey of new Set(rejected.map(row => row.student_key))) {
+            this.notify(studentKey, 'info', 'Your message was not posted.');
+        }
+    }
+}

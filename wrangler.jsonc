@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pixel-plaza",
+  "account_id": "b7cc0719d9ecb3485646785035f87ca1",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+
+  // The built app (npm run build). Only /api/* runs the Worker.
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+
+  // The plaza: the multiplayer room plus every student's saved progress.
+  "durable_objects": {
+    "bindings": [{ "name": "PLAZA", "class_name": "PlazaRoom" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["PlazaRoom"] }],
+
+  // PinPlay owns Google sign-in, the roster and student sessions, as for Dictation Time.
+  "services": [{ "binding": "PINPLAY_AUTH", "service": "pinplay-api" }],
+
+  // Budget for teacher-password and class-PIN guesses. Its own namespace, so it
+  // never eats into PinPlay's (1001) or Dictation Time's (2001).
+  "ratelimits": [{ "name": "AUTH_RL", "namespace_id": "3001", "simple": { "limit": 50, "period": 60 } }]
+}

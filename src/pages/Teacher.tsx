@@ -1,41 +1,61 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { serverUrl } from '../config';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string };
-type Status = { open: boolean; entries: Entry[]; muted: string[] };
+type Status = { open: boolean; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[] };
+
+async function call<T>(path: string, init: RequestInit): Promise<T> {
+  const response = await fetch(`/api/teacher/${path}`, init);
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw Object.assign(new Error(result.error || 'Request failed.'), { status: response.status });
+  return result as T;
+}
 
 export default function Teacher() {
-  const [key, setKey] = useState('');
+  const [password, setPassword] = useState('');
+  // The password is checked once; the session token carries the rest.
+  const [token, setToken] = useState('');
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
 
-  const request = useCallback(async (path: string, body?: object): Promise<Status> => {
-    const response = await fetch(`${serverUrl}/api/teacher/${path}`, {
-      method: body ? 'POST' : 'GET',
-      headers: { 'x-teacher-key': key, 'content-type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined
-    });
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || 'Request failed.');
-    return result as Status;
-  }, [key]);
+  const request = useCallback((path: string, body?: object) => call<Status>(path, {
+    method: body ? 'POST' : 'GET',
+    headers: { 'x-teacher-session': token, 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  }), [token]);
+
+  const failed = useCallback((cause: unknown) => {
+    setError(cause instanceof Error ? cause.message : 'Connection failed.');
+    if ((cause as { status?: number }).status === 401) { setToken(''); setStatus(null); } // the session expired
+  }, []);
 
   const refresh = useCallback(async () => {
     try { setStatus(await request('status')); setError(''); }
-    catch (cause) { setStatus(null); setError(cause instanceof Error ? cause.message : 'Connection failed.'); }
-  }, [request]);
+    catch (cause) { failed(cause); }
+  }, [request, failed]);
 
   useEffect(() => {
-    if (!status) return;
+    if (!token) return;
     const timer = window.setInterval(() => { void refresh(); }, 2000);
     return () => window.clearInterval(timer);
-  }, [status, refresh]);
+  }, [token, refresh]);
+
+  const signIn = async () => {
+    try {
+      const { token: session } = await call<{ token: string }>('login', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password })
+      });
+      setStatus(await call<Status>('status', { headers: { 'x-teacher-session': session } }));
+      setPassword('');
+      setError('');
+      setToken(session);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed.'); }
+  };
 
   const action = async (path: string, body: object) => {
     try { setStatus(await request(path, body)); setError(''); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : 'Request failed.'); }
+    catch (cause) { failed(cause); }
   };
 
   return <main className="teacher-page">
@@ -43,9 +63,10 @@ export default function Teacher() {
       <div><h1>Teacher controls</h1><p>All student chat waits for your approval.</p></div>
       <Link to="/">Student entrance</Link>
     </header>
-    {!status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void refresh(); }}>
-      <label htmlFor="teacher-key">Teacher key</label>
-      <input id="teacher-key" type="password" value={key} onChange={event => setKey(event.target.value)} required />
+    {!token || !status ? <form className="teacher-signin" onSubmit={event => { event.preventDefault(); void signIn(); }}>
+      <label htmlFor="teacher-password">Teacher password (the same as PinPlay)</label>
+      <input id="teacher-password" type="password" autoComplete="current-password" value={password}
+        onChange={event => setPassword(event.target.value)} required />
       <button className="btn btn-primary">Open controls</button>
     </form> : <>
       <section className="teacher-controls">
@@ -53,7 +74,11 @@ export default function Teacher() {
         <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
         </button>
-        <button className="btn btn-secondary" onClick={() => { setStatus(null); setKey(''); }}>Sign out</button>
+        <button className="btn btn-secondary" onClick={() => { setStatus(null); setToken(''); }}>Sign out</button>
+      </section>
+      <section className="teacher-online">
+        <h2>In the Plaza now ({status.online.length})</h2>
+        <p>{status.online.length ? status.online.map(student => student.name).join(', ') : 'Nobody yet.'}</p>
       </section>
       <section className="teacher-entries">
         <h2>Chat review</h2>

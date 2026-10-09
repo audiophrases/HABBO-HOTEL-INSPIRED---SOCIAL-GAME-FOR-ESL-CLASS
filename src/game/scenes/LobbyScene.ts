@@ -1,22 +1,26 @@
 import Phaser from 'phaser';
-import * as Colyseus from 'colyseus.js';
 import { renderAvatarSvg } from '../../utils/AvatarRenderer';
-import type { AvatarConfig } from '../../utils/AvatarRenderer';
+import type { PlazaConnection, PlazaEvent, PlazaPlayer } from '../../plaza';
+
+// Position updates go out at most this often; remote avatars glide between them.
+const SEND_EVERY_MS = 100;
 
 export default class LobbyScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private walls!: Phaser.Physics.Arcade.StaticGroup;
-  private room!: Colyseus.Room;
-  
-  private playerEntities: { [sessionId: string]: Phaser.GameObjects.Container } = {};
-  private localPlayerContainer!: Phaser.GameObjects.Container;
+  private connection!: PlazaConnection;
+
+  private playerEntities: { [id: string]: Phaser.GameObjects.Container } = {};
+  private localPlayerContainer?: Phaser.GameObjects.Container;
+  private sent = { x: 0, y: 0 };
+  private lastSent = 0;
 
   constructor() {
     super('LobbyScene');
   }
 
-  init(data: { username: string, room: Colyseus.Room }) {
-    this.room = data.room;
+  init(data: { connection: PlazaConnection }) {
+    this.connection = data.connection;
   }
 
   preload() {
@@ -63,76 +67,81 @@ export default class LobbyScene extends Phaser.Scene {
     // 4. Bottom Left Trees & Decor
     createWall(0, 850, 450, 1198);
 
-    this.room.state.players.onAdd((player: any, sessionId: string) => {
-      const isLocal = (sessionId === this.room.sessionId);
+    this.syncRoster();
+    const unsubscribe = this.connection.subscribe(event => this.onPlazaEvent(event));
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, unsubscribe);
+    this.events.once(Phaser.Scenes.Events.DESTROY, unsubscribe);
+  }
 
-      // Create nameplate
-      const nameText = this.add.text(0, -60, player.username, {
-        fontSize: '12px',
-        fontFamily: '"Press Start 2P", cursive',
-        color: '#ffffff',
-        backgroundColor: 'rgba(0,0,0,0.5)',
-        padding: { x: 4, y: 2 }
-      }).setOrigin(0.5);
-      
-      const container = this.add.container(player.x, player.y, [nameText]);
-      this.playerEntities[sessionId] = container;
+  private onPlazaEvent(event: PlazaEvent) {
+    if (event.t === 'roster') this.syncRoster();
+    else if (event.t === 'join') this.addPlayer(event.player);
+    else if (event.t === 'leave') this.removePlayer(event.id);
+    else if (event.t === 'move' && event.id !== this.connection.selfId) {
+      const container = this.playerEntities[event.id];
+      if (!container) return;
+      this.tweens.killTweensOf(container);
+      this.tweens.add({ targets: container, x: event.x, y: event.y, duration: SEND_EVERY_MS });
+    } else if (event.t === 'emote') {
+      const container = this.playerEntities[event.id];
+      if (container) this.showEmote(container, event.emote);
+    }
+  }
 
-      // Render Avatar SVG
-      const config: AvatarConfig = {
-        skin: player.skin,
-        hairColor: player.hairColor,
-        hair: player.hair,
-        eyes: player.eyes,
-        mouth: player.mouth,
-        shirt: player.shirt,
-        glasses: player.glasses,
-        hat: player.hat
-      };
+  // Draws exactly the connection's roster. After a reconnect the student has a
+  // new id; their avatar stays where it was rather than jumping back.
+  private syncRoster() {
+    const previous = this.localPlayerContainer && { x: this.localPlayerContainer.x, y: this.localPlayerContainer.y };
+    for (const id of Object.keys(this.playerEntities)) {
+      if (!this.connection.players.has(id)) this.removePlayer(id);
+    }
+    for (const player of this.connection.players.values()) {
+      if (!this.playerEntities[player.id]) this.addPlayer(player);
+    }
+    if (previous && this.localPlayerContainer) this.localPlayerContainer.setPosition(previous.x, previous.y);
+  }
 
-      const svgStr = renderAvatarSvg(config);
-      this.loadSvgToContainer(sessionId, svgStr, container, isLocal);
+  private addPlayer(player: PlazaPlayer) {
+    const isLocal = player.id === this.connection.selfId;
 
-      if (isLocal) {
-        this.localPlayerContainer = container;
-        this.physics.world.enable(this.localPlayerContainer);
-        const body = this.localPlayerContainer.body as Phaser.Physics.Arcade.Body;
-        // Adjust body size to approximate the avatar
-        body.setSize(32, 64);
-        body.setOffset(-16, -32);
-        body.setCollideWorldBounds(true);
-        
-        // Collide with buildings/walls
-        this.physics.add.collider(this.localPlayerContainer, this.walls);
-        
-        this.cameras.main.startFollow(this.localPlayerContainer, true, 0.1, 0.1);
-      } else {
-        player.onChange(() => {
-          this.tweens.add({
-            targets: container,
-            x: player.x,
-            y: player.y,
-            duration: 100
-          });
-        });
-      }
-    });
+    // Create nameplate
+    const nameText = this.add.text(0, -60, player.name, {
+      fontSize: '12px',
+      fontFamily: '"Press Start 2P", cursive',
+      color: '#ffffff',
+      backgroundColor: 'rgba(0,0,0,0.5)',
+      padding: { x: 4, y: 2 }
+    }).setOrigin(0.5);
 
-    this.room.state.players.onRemove((_player: any, sessionId: string) => {
-      const container = this.playerEntities[sessionId];
-      if (container) {
-        container.destroy();
-        delete this.playerEntities[sessionId];
-      }
-      this.textures.remove('avatar_' + sessionId);
-    });
+    const container = this.add.container(player.x, player.y, [nameText]);
+    this.playerEntities[player.id] = container;
+    this.loadSvgToContainer(player.id, renderAvatarSvg(player), container, isLocal);
 
-    this.room.onMessage("player_emote", (data: { sessionId: string, emote: string }) => {
-      const container = this.playerEntities[data.sessionId];
-      if (container) {
-        this.showEmote(container, data.emote);
-      }
-    });
+    if (isLocal) {
+      this.localPlayerContainer = container;
+      this.sent = { x: player.x, y: player.y };
+      this.physics.world.enable(this.localPlayerContainer);
+      const body = this.localPlayerContainer.body as Phaser.Physics.Arcade.Body;
+      // Adjust body size to approximate the avatar
+      body.setSize(32, 64);
+      body.setOffset(-16, -32);
+      body.setCollideWorldBounds(true);
+
+      // Collide with buildings/walls
+      this.physics.add.collider(this.localPlayerContainer, this.walls);
+
+      this.cameras.main.startFollow(this.localPlayerContainer, true, 0.1, 0.1);
+    }
+  }
+
+  private removePlayer(id: string) {
+    const container = this.playerEntities[id];
+    if (container) {
+      if (container === this.localPlayerContainer) this.localPlayerContainer = undefined;
+      container.destroy();
+      delete this.playerEntities[id];
+    }
+    this.textures.remove('avatar_' + id);
   }
 
   private showEmote(container: Phaser.GameObjects.Container, emote: string) {
@@ -189,14 +198,11 @@ export default class LobbyScene extends Phaser.Scene {
     };
   }
 
-  update() {
+  update(time: number) {
     if (!this.cursors || !this.localPlayerContainer || !this.localPlayerContainer.body) return;
 
     const body = this.localPlayerContainer.body as Phaser.Physics.Arcade.Body;
     const speed = 200;
-    
-    const prevX = this.localPlayerContainer.x;
-    const prevY = this.localPlayerContainer.y;
 
     body.setVelocity(0);
 
@@ -212,11 +218,12 @@ export default class LobbyScene extends Phaser.Scene {
       body.setVelocityY(speed);
     }
 
-    if (this.localPlayerContainer.x !== prevX || this.localPlayerContainer.y !== prevY) {
-      this.room.send("move", { 
-        x: this.localPlayerContainer.x, 
-        y: this.localPlayerContainer.y 
-      });
+    // Throttled, and always ends with where the avatar stopped.
+    const { x, y } = this.localPlayerContainer;
+    if ((x !== this.sent.x || y !== this.sent.y) && time - this.lastSent >= SEND_EVERY_MS
+      && this.connection.send({ t: 'move', x, y })) {
+      this.sent = { x, y };
+      this.lastSent = time;
     }
   }
 }

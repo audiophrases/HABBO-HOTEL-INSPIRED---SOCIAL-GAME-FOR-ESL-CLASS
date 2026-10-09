@@ -1,0 +1,205 @@
+import type { AvatarConfig } from './utils/AvatarRenderer';
+
+export type PlazaPlayer = AvatarConfig & { id: string; name: string; x: number; y: number };
+export type PlazaStatus = { state: 'connecting' | 'online' | 'reconnecting' | 'stopped'; message?: string };
+export type PlazaEvent =
+  | { t: 'roster' } // everyone was replaced: first join, or back after a dropped connection
+  | { t: 'join'; player: PlazaPlayer }
+  | { t: 'leave'; id: string }
+  | { t: 'move'; id: string; x: number; y: number }
+  | { t: 'emote'; id: string; emote: string }
+  | { t: 'chat'; sender: string; text: string; ts: number }
+  | { t: 'notice'; level: 'info' | 'warning'; text: string };
+
+// As in PinPlay's live-socket.js: a connection can die without closing (a laptop
+// lid, Wi-Fi roaming), and only a missing pong shows it. The room answers
+// 'ping' without waking up.
+const PING_EVERY_MS = 10000;
+const PONG_WITHIN_MS = 5000;
+const BACKOFF_MS = [1000, 2000, 4000, 8000, 15000];
+const CLOSE_REPLACED = 4009;
+
+// A refusal that retrying cannot fix, such as a wrong PIN or a closed class.
+class Refused extends Error {}
+
+// One student's connection to the plaza. It keeps the roster, so a scene that
+// starts late can draw everyone, and rejoins by itself after a drop.
+export class PlazaConnection {
+  players = new Map<string, PlazaPlayer>();
+  selfId = '';
+  status: PlazaStatus = { state: 'connecting' };
+  private pin: string;
+  private token: string;
+  private avatar: AvatarConfig | null;
+  private listeners = new Set<(event: PlazaEvent) => void>();
+  private statusListeners = new Set<(status: PlazaStatus) => void>();
+  private ws: WebSocket | null = null;
+  private opening = false;
+  private stopped = false;
+  private fails = 0;
+  private pingTimer = 0;
+  private pongTimer = 0;
+  private retryTimer = 0;
+
+  // A null avatar keeps the one saved on the server.
+  constructor(pin: string, token: string, avatar: AvatarConfig | null) {
+    this.pin = pin;
+    this.token = token;
+    this.avatar = avatar;
+    document.addEventListener('visibilitychange', this.wake);
+    window.addEventListener('online', this.wake);
+    void this.open();
+  }
+
+  subscribe(listener: (event: PlazaEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  onStatus(listener: (status: PlazaStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => { this.statusListeners.delete(listener); };
+  }
+
+  send(message: object): boolean {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.selfId) return false;
+    this.ws.send(JSON.stringify(message));
+    return true;
+  }
+
+  close(): void {
+    this.stopped = true;
+    this.cleanup();
+    const ws = this.ws;
+    this.ws = null;
+    ws?.close(1000);
+  }
+
+  private emit(event: PlazaEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
+  private setStatus(status: PlazaStatus): void {
+    this.status = status;
+    for (const listener of this.statusListeners) listener(status);
+  }
+
+  private cleanup(): void {
+    window.clearInterval(this.pingTimer);
+    window.clearTimeout(this.pongTimer);
+    window.clearTimeout(this.retryTimer);
+    document.removeEventListener('visibilitychange', this.wake);
+    window.removeEventListener('online', this.wake);
+  }
+
+  private async join(): Promise<string> {
+    const response = await fetch('/api/plaza/join', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-student-token': this.token },
+      body: JSON.stringify({ pin: this.pin, avatar: this.avatar })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.ok && typeof result.ticket === 'string') {
+      this.avatar = null; // saved now; rejoining keeps it
+      return result.ticket;
+    }
+    if (response.status >= 400 && response.status < 500) throw new Refused(result.error || 'Could not join the Plaza.');
+    throw new Error(result.error || 'Could not reach the Plaza.');
+  }
+
+  private async open(): Promise<void> {
+    if (this.stopped || this.ws || this.opening) return;
+    this.opening = true;
+    let ticket: string;
+    try {
+      ticket = await this.join();
+    } catch (error) {
+      if (error instanceof Refused) this.stop(error.message);
+      else this.retry();
+      return;
+    } finally {
+      this.opening = false;
+    }
+    if (this.stopped) return;
+
+    const url = new URL('/api/plaza/ws', window.location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('ticket', ticket);
+    const ws = new WebSocket(url);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.pingTimer = window.setInterval(() => {
+        if (ws.readyState !== WebSocket.OPEN) return;
+        ws.send('ping');
+        window.clearTimeout(this.pongTimer);
+        this.pongTimer = window.setTimeout(() => this.lost(ws, 0), PONG_WITHIN_MS);
+      }, PING_EVERY_MS);
+    };
+    ws.onmessage = event => {
+      if (ws !== this.ws) return;
+      window.clearTimeout(this.pongTimer); // anything arriving proves the connection is alive
+      if (event.data === 'pong') return;
+      try { this.receive(JSON.parse(event.data)); } catch { /* not ours */ }
+    };
+    ws.onclose = event => this.lost(ws, event.code);
+  }
+
+  private receive(message: any): void {
+    if (message.t === 'welcome') {
+      this.selfId = message.id;
+      this.players = new Map((message.players as PlazaPlayer[]).map(player => [player.id, player]));
+      this.fails = 0;
+      this.setStatus({ state: 'online' });
+      this.emit({ t: 'roster' });
+      return;
+    }
+    if (message.t === 'join') this.players.set(message.player.id, message.player);
+    if (message.t === 'leave') this.players.delete(message.id);
+    if (message.t === 'move') {
+      const player = this.players.get(message.id);
+      if (player) { player.x = message.x; player.y = message.y; }
+    }
+    this.emit(message as PlazaEvent);
+  }
+
+  private lost(ws: WebSocket, code: number): void {
+    if (ws !== this.ws) return;
+    this.ws = null;
+    window.clearInterval(this.pingTimer);
+    window.clearTimeout(this.pongTimer);
+    ws.onclose = null;
+    ws.onmessage = null;
+    try { ws.close(); } catch { /* already closed */ }
+    if (this.stopped) return;
+    if (code === CLOSE_REPLACED) this.stop('Pixel Plaza is open in another window or tab.');
+    else this.retry(); // includes 4001, an unusable ticket: the next join asks for a new one
+  }
+
+  private retry(): void {
+    if (this.stopped) return;
+    this.fails += 1;
+    this.setStatus({ state: 'reconnecting' });
+    window.clearTimeout(this.retryTimer);
+    this.retryTimer = window.setTimeout(() => void this.open(), BACKOFF_MS[Math.min(this.fails, BACKOFF_MS.length) - 1]);
+  }
+
+  private stop(message: string): void {
+    this.stopped = true;
+    this.cleanup();
+    this.setStatus({ state: 'stopped', message });
+  }
+
+  // Back from a locked screen or without network: check at once.
+  private wake = (): void => {
+    if (this.stopped || document.visibilityState === 'hidden') return;
+    if (!this.ws) {
+      window.clearTimeout(this.retryTimer);
+      void this.open();
+    } else if (this.ws.readyState === WebSocket.OPEN) {
+      const ws = this.ws;
+      ws.send('ping');
+      window.clearTimeout(this.pongTimer);
+      this.pongTimer = window.setTimeout(() => this.lost(ws, 0), PONG_WITHIN_MS);
+    }
+  };
+}
