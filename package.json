@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
-    "colyseus.js": "^0.16.22",
+    "colyseus.js": "^0.15.28",
     "phaser": "^4.2.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
