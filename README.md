@@ -33,6 +33,8 @@ The teacher's side is saved too: whether the class is open, mutes, and the last 
 
    It prints the address, `https://pixel-plaza.eugenime.workers.dev`.
 
+   Later deploys: double-click `deploy.bat`.
+
 2. **Set the two secrets**, each prompted securely:
 
    ```powershell
@@ -69,7 +71,7 @@ The class can play on the teacher's laptop instead, over the school network. Stu
 
 Once on the laptop: install Node.js, copy the project, run `npm ci`, and create `.dev.vars` from `.dev.vars.example` with the real `CLASS_PIN` and the same `CREATE_PASSWORD_HASH` as online. Then, each lesson:
 
-1. Run `npm run classroom` and keep the window open. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
+1. Double-click `classroom.bat` (or run `npm run classroom`) and keep the window open. The batch file also opens the teacher controls when the server is ready. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
 2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class**.
 3. Students open the online site as usual and sign in with Google. They go straight to the laptop, type the class PIN there, and choose their avatar.
 4. **Close class** stops sending students to the laptop. The link also ends by itself after 12 hours. Until then, a student who signs in online is sent to the laptop's address even if it is switched off.

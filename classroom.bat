@@ -1,0 +1,27 @@
+@echo off
+rem Runs the class on this laptop and opens the teacher controls. Double-click
+rem to run; keep the window open during the lesson. Close it to stop the class.
+cd /d "%~dp0"
+title Pixel Plaza - class server
+
+where node >nul 2>nul || (echo Node.js is not installed. Get it from https://nodejs.org & pause & exit /b 1)
+
+if not exist .dev.vars (
+    echo .dev.vars is missing. Copy .dev.vars.example to .dev.vars and fill in
+    echo the class PIN and the teacher password hash. See README.md.
+    pause
+    exit /b 1
+)
+
+if not exist node_modules (
+    echo Installing dependencies...
+    call npm ci || (echo. & echo Installing failed. & pause & exit /b 1)
+)
+
+rem Opens the teacher controls in the browser once the server answers.
+start "" /min powershell -NoProfile -WindowStyle Hidden -Command ^
+  "for ($i = 0; $i -lt 180; $i++) { try { Invoke-WebRequest -UseBasicParsing http://localhost:8787/api/health | Out-Null; Start-Process http://localhost:8787/teacher; break } catch { Start-Sleep 1 } }"
+
+set PORT=8787
+call npm run classroom
+pause
