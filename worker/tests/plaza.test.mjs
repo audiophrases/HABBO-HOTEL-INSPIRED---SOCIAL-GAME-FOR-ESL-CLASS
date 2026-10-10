@@ -13,10 +13,16 @@ import { sha256Hex } from '../rules.ts';
 
 const root = path.join(import.meta.dirname, '..', '..');
 const wrangler = path.join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
-const PIN = '654321';
+let PIN = ''; // the teacher page shows it once the class is open
 const PASSWORD = 'local test password';
 const students = { 'signed-a': { studentKey: 'stu_a', displayName: 'Alex', className: '4B' },
     'signed-b': { studentKey: 'stu_b', displayName: 'Sam', className: '4B' } };
+
+// Windows can hold workerd's files a moment after it exits; a leftover temp
+// folder must not hide the test's real result.
+function removeTemp(dir) {
+    try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* left in temp */ }
+}
 
 async function freePort() {
     const server = net.createServer();
@@ -44,7 +50,7 @@ async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
     const port = await freePort();
     const child = spawn(process.execPath, [wrangler, 'dev', '--port', String(port), '--inspector-port', '0',
         '--persist-to', persistTo, '--show-interactive-dev-session=false',
-        '--var', `CLASS_PIN:${PIN}`, '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
+        '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
         '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
         ...Object.entries(vars).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
@@ -126,7 +132,13 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         const closedJoin = await api(base, '/api/plaza/join', { token: 'signed-a', body: { pin: PIN } });
         assert.equal(closedJoin.status, 403);
         assert.match(closedJoin.body.error, /not opened/);
-        assert.equal((await api(base, '/api/teacher/class', { session, body: { open: true } })).body.open, true);
+        assert.equal((await api(base, '/api/teacher/status', { session })).body.pin, null);
+        const opened = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body;
+        assert.equal(opened.open, true);
+        assert.match(opened.pin, /^\d{6}$/);
+        PIN = opened.pin;
+        // Opening again mid-lesson keeps the PIN students already have.
+        assert.equal((await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin, PIN);
 
         // The PIN and the PinPlay identity both gate the door.
         assert.equal((await api(base, '/api/plaza/join', { token: 'signed-a', body: { pin: '000000' } })).status, 403);
@@ -197,6 +209,7 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         assert.equal((await api(base, '/api/student/me', { token: 'signed-b' })).body.avatar, null);
         status = (await api(base, '/api/teacher/status', { session })).body;
         assert.equal(status.open, true);
+        assert.equal(status.pin, PIN);
         assert.deepEqual(status.muted, ['stu_a']);
         assert.equal(status.entries.find(entry => entry.text === 'Hello class!').status, 'approved');
 
@@ -204,14 +217,18 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         sockets.push(alexNextLesson);
         assert.deepEqual([alexNextLesson.me.x, alexNextLesson.me.y, alexNextLesson.me.hair], [910, 805, 3]);
 
-        // Closing the class keeps new students out.
+        // Closing the class keeps new students out, and the next lesson has a new PIN.
         await api(base, '/api/teacher/class', { session, body: { open: false } });
         assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: PIN } })).status, 403);
+        const nextPin = (await api(base, '/api/teacher/class', { session, body: { open: true } })).body.pin;
+        assert.notEqual(nextPin, PIN);
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: PIN } })).status, 403);
+        assert.equal((await api(base, '/api/plaza/join', { token: 'signed-b', body: { pin: nextPin } })).status, 200);
     } finally {
         for (const socket of sockets) socket.ws.close();
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
-        fs.rmSync(persistTo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        removeTemp(persistTo);
     }
 });
 
@@ -243,6 +260,7 @@ test("the class plays on the teacher's laptop; students sign in online and are s
         const opened = await api(laptop.base, '/api/teacher/class', { session, body: { open: true } });
         assert.equal(opened.body.notice, '');
         assert.deepEqual(opened.body.laptop, { url: lanUrl, signInUrl: online.base });
+        PIN = opened.body.pin;
 
         // The PinPlay session from online carries the student's name onto the laptop.
         const alex = await enter(laptop.base, 'signed-a', { skin: 1 });
@@ -259,6 +277,6 @@ test("the class plays on the teacher's laptop; students sign in online and are s
         await laptop?.stop();
         await online.stop();
         await new Promise(resolve => pinPlay.close(resolve));
-        for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        for (const dir of dirs) removeTemp(dir);
     }
 });

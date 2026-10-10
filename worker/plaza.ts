@@ -25,6 +25,7 @@ export type TeacherAction =
 
 export type TeacherStatus = {
     open: boolean;
+    pin: string | null; // students type it to join; new each time the class opens
     entries: { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string }[];
     muted: string[];
     online: { studentKey: string; name: string }[];
@@ -59,6 +60,12 @@ export class PlazaRoom extends DurableObject<Env> {
     }
 
     // ---------- Called by the Worker ----------
+
+    // The PIN students type to join, or null while the class is closed.
+    classPin(): string | null {
+        if (!this.isOpen()) return null;
+        return this.setting('pin') ?? this.newPin();
+    }
 
     savedAvatar(studentKey: string): Avatar | null {
         const row = this.sql.exec<{ avatar: string | null }>('SELECT avatar FROM students WHERE student_key = ?', studentKey).toArray()[0];
@@ -134,6 +141,7 @@ export class PlazaRoom extends DurableObject<Env> {
         // recent history, read through the indexes, not the whole log each time.
         return {
             open: this.isOpen(),
+            pin: this.classPin(),
             entries: this.sql.exec<TeacherStatus['entries'][number]>(`SELECT id, student_key AS studentKey, sender, text,
                 ts AS timestamp, status FROM (
                     SELECT * FROM chat WHERE status = 'pending'
@@ -218,6 +226,12 @@ export class PlazaRoom extends DurableObject<Env> {
         return this.setting('open') === '1';
     }
 
+    private newPin(): string {
+        const pin = String(100000 + crypto.getRandomValues(new Uint32Array(1))[0] % 900000);
+        this.saveSetting('pin', pin);
+        return pin;
+    }
+
     private laptop(): { url: string | null; lease: string; expires: number } | null {
         const value = this.setting('laptop');
         const laptop = value ? JSON.parse(value) : null;
@@ -293,7 +307,10 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Closing rejects pending chat and stops new joins; students already in stay.
     private setOpen(open: boolean): void {
+        const wasOpen = this.isOpen();
         this.saveSetting('open', open ? '1' : '0');
+        // Each lesson gets its own PIN, so last lesson's no longer lets anyone in.
+        if (open && !wasOpen) this.newPin();
         if (open) return;
         const rejected = this.sql.exec<{ student_key: string }>(
             "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();

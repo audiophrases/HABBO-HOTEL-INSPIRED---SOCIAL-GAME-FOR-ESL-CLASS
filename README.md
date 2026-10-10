@@ -35,14 +35,13 @@ The teacher's side is saved too: whether the class is open, mutes, and the last 
 
    Later deploys: double-click `deploy.bat`.
 
-2. **Set the two secrets**, each prompted securely:
+2. **Set the teacher password**, prompted securely:
 
    ```powershell
-   npx wrangler secret put CLASS_PIN
    npx wrangler secret put CREATE_PASSWORD_HASH
    ```
 
-   `CLASS_PIN` is 4–8 digits. `CREATE_PASSWORD_HASH` is the teacher password as a lowercase-hex SHA-256. **Use the same value as PinPlay's** and the teacher signs in with the PinPlay password. To make one:
+   `CREATE_PASSWORD_HASH` is the teacher password as a lowercase-hex SHA-256. **Use the same value as PinPlay's** and the teacher signs in with the PinPlay password. To make one:
 
    ```powershell
    node -e "console.log(require('crypto').createHash('sha256').update(process.argv[1].trim().normalize('NFC')).digest('hex'))" "your password"
@@ -56,23 +55,23 @@ Configure PinPlay's roster policy (**PinPlay → Students**) for the intended cl
 
 ## In class
 
-1. Open `/teacher`, sign in with the teacher password, and press **Open class**.
+1. Open `/teacher`, sign in with the teacher password, and press **Open class**. The page shows a new 6-digit class PIN for this lesson; write it on the board.
 2. Students open the site, type the class PIN, and sign in with their school Google account (once per device; the session lasts as long as PinPlay's).
 3. Approve or reject chat as it arrives. **Mute student** follows the student across reconnects and lessons.
 4. **Close class** at the end. Pending chat is rejected and nobody new can join.
 
 A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening the plaza in a second tab moves the student's avatar there and tells the first tab why.
 
-To change the PIN, run `npx wrangler secret put CLASS_PIN` again.
+The PIN changes every time the class is opened, so last lesson's PIN no longer works. It only lets students in: their avatar and position are saved under their Google account and carry over from lesson to lesson whatever the PIN.
 
 ## Play on the teacher's laptop
 
 The class can play on the teacher's laptop instead, over the school network. Students still sign in with Google online, because Google sign-in needs HTTPS, and are then sent to the laptop with their PinPlay session, so their name comes with them.
 
-Once on the laptop: install Node.js, copy the project, run `npm ci`, and create `.dev.vars` from `.dev.vars.example` with the real `CLASS_PIN` and the same `CREATE_PASSWORD_HASH` as online. Then, each lesson:
+Once on the laptop: install Node.js, copy the project, run `npm ci`, and create `.dev.vars` from `.dev.vars.example` with the same `CREATE_PASSWORD_HASH` as online. Then, each lesson:
 
 1. Double-click `classroom.bat` (or run `npm run classroom`) and keep the window open. The batch file also opens the teacher controls when the server is ready. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
-2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class**.
+2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class** and write the class PIN it shows on the board.
 3. Students open the online site as usual and sign in with Google. They go straight to the laptop, type the class PIN there, and choose their avatar.
 4. **Close class** stops sending students to the laptop. The link also ends by itself after 12 hours. Until then, a student who signs in online is sent to the laptop's address even if it is switched off.
 
@@ -106,7 +105,7 @@ npm test
 
 ## Current limits
 
-- The PIN is shared by the class. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
+- The PIN is shared by the class and changes each lesson. PinPlay supplies each student's verified Google identity; this app depends on PinPlay's login and roster policy.
 - There is one plaza. Every class shares it, so open it for one class at a time.
 - The word and phrase filter catches only a small set of obvious cases. Teacher approval is the moderation gate. There is no dictionary enforcement or AI context review.
 - Chat is shared across the room. Proximity chat, whispers, room decoration, items, and building interiors are not implemented.

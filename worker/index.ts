@@ -9,7 +9,6 @@ export interface Env {
     PINPLAY_AUTH?: Fetcher;
     // Local development and tests only; production uses PINPLAY_AUTH.
     PINPLAY_API_URL?: string;
-    CLASS_PIN?: string;
     // Same value as PinPlay's, so the teacher has one password.
     CREATE_PASSWORD_HASH?: string;
     AUTH_RL?: RateLimit;
@@ -114,9 +113,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
 
     if (path === '/api/plaza/join' && post) {
-        if (!env.CLASS_PIN) return json({ error: 'The class PIN has not been set up.' }, 503);
         const student = await resolveStudent(env, request.headers.get('x-student-token'));
-        const pin = await guarded(env, `pin:${student.studentKey}`, () => secretsMatch(body?.pin, env.CLASS_PIN || ''));
+        const classPin = await plaza(env).classPin();
+        if (!classPin) return json({ error: 'Your teacher has not opened the class yet.' }, 403);
+        const pin = await guarded(env, `pin:${student.studentKey}`, () => secretsMatch(body?.pin, classPin));
         if (pin === 'limited') return json({ error: 'Too many tries. Wait a minute, then try again.' }, 429);
         if (pin === 'wrong') return json({ error: 'Check the class PIN.' }, 403);
         const avatar = body?.avatar == null ? null : sanitizeAvatar(body.avatar);

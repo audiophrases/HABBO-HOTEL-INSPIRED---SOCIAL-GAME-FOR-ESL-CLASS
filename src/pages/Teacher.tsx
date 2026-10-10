@@ -5,7 +5,7 @@ import './Teacher.css';
 type Entry = { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string };
 // laptop is set when this runs on the teacher's laptop (npm run classroom).
 type Status = {
-  open: boolean; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[];
+  open: boolean; pin: string | null; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[];
   laptop?: { url: string; signInUrl: string } | null; notice?: string;
 };
 
@@ -82,6 +82,7 @@ export default function Teacher() {
     </form> : <>
       <section className="teacher-controls">
         <strong>Class is {status.open ? 'open' : 'closed'}</strong>
+        {status.pin && <span className="teacher-pin">Class PIN <strong>{status.pin}</strong></span>}
         <button className="btn btn-primary" onClick={() => void action('class', { open: !status.open })}>
           {status.open ? 'Close class' : 'Open class'}
         </button>

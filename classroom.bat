@@ -8,7 +8,7 @@ where node >nul 2>nul || (echo Node.js is not installed. Get it from https://nod
 
 if not exist .dev.vars (
     echo .dev.vars is missing. Copy .dev.vars.example to .dev.vars and fill in
-    echo the class PIN and the teacher password hash. See README.md.
+    echo the teacher password hash. See README.md.
     pause
     exit /b 1
 )
