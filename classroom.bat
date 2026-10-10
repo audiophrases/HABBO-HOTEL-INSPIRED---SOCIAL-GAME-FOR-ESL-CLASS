@@ -6,11 +6,9 @@ title Pixel Plaza - class server
 
 where node >nul 2>nul || (echo Node.js is not installed. Get it from https://nodejs.org & pause & exit /b 1)
 
+rem First time on this laptop: ask for the teacher password and save its hash.
 if not exist .dev.vars (
-    echo .dev.vars is missing. Copy .dev.vars.example to .dev.vars and fill in
-    echo the teacher password hash. See README.md.
-    pause
-    exit /b 1
+    node scripts\setup-laptop.mjs || (pause & exit /b 1)
 )
 
 if not exist node_modules (

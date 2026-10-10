@@ -68,7 +68,7 @@ The PIN changes every time the class is opened, so last lesson's PIN no longer w
 
 The class can play on the teacher's laptop instead, over the school network. Students still sign in with Google online, because Google sign-in needs HTTPS, and are then sent to the laptop with their PinPlay session, so their name comes with them.
 
-Once on the laptop: install Node.js, copy the project, run `npm ci`, and create `.dev.vars` from `.dev.vars.example` with the same `CREATE_PASSWORD_HASH` as online. Then, each lesson:
+Once on the laptop: install Node.js and copy the project. The first time `classroom.bat` runs it asks for the teacher password (the same as online) and saves its hash in `.dev.vars`; delete that file to enter it again. Then, each lesson:
 
 1. Double-click `classroom.bat` (or run `npm run classroom`) and keep the window open. The batch file also opens the teacher controls when the server is ready. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
 2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class** and write the class PIN it shows on the board.
