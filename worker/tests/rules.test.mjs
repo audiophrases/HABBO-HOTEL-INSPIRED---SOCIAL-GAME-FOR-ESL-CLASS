@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chatProblem, clampPosition, plazaName, sanitizeAvatar, secretsMatch, sha256Hex, teacherPasswordMatches } from '../rules.ts';
+import { chatProblem, clampPosition, laptopOrigin, plazaName, sanitizeAvatar, secretsMatch, sha256Hex, teacherPasswordMatches } from '../rules.ts';
 
 test('chat validation blocks invalid content and caps length', () => {
     assert.match(chatProblem('nobody likes you'), /rewrite/);
@@ -42,4 +42,11 @@ test('class PIN and teacher password must match exactly', async () => {
     assert.equal(await teacherPasswordMatches('correct horse', hash.toUpperCase()), true);
     assert.equal(await teacherPasswordMatches('wrong', hash), false);
     assert.equal(await teacherPasswordMatches('correct horse', ''), false);
+});
+
+test('a laptop address is reduced to its http(s) origin', () => {
+    assert.equal(laptopOrigin('http://192.168.1.20:8787/teacher?x=1#y'), 'http://192.168.1.20:8787');
+    assert.equal(laptopOrigin('javascript:alert(1)'), null);
+    assert.equal(laptopOrigin('http://user:pass@192.168.1.20'), null);
+    assert.equal(laptopOrigin(42), null);
 });

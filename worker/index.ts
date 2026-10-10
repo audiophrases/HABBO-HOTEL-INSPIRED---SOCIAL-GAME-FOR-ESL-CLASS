@@ -1,6 +1,6 @@
 import { PlazaRoom, type TeacherAction } from './plaza.ts';
 import { PinPlayAuthError, resolveStudent, studentConfig, studentLogin } from './pinplay.ts';
-import { sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
+import { laptopOrigin, sanitizeAvatar, secretsMatch, teacherPasswordMatches } from './rules.ts';
 
 export { PlazaRoom };
 
@@ -13,6 +13,10 @@ export interface Env {
     // Same value as PinPlay's, so the teacher has one password.
     CREATE_PASSWORD_HASH?: string;
     AUTH_RL?: RateLimit;
+    // Set only on the teacher's laptop (npm run classroom): its address on the
+    // school network, and the online Pixel Plaza where students sign in.
+    LAN_URL?: string;
+    CLOUD_URL?: string;
 }
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -40,6 +44,38 @@ async function guarded(env: Env, key: string, check: () => boolean | Promise<boo
     return 'wrong';
 }
 
+async function checkTeacherPassword(request: Request, env: Env, password: unknown): Promise<Response | null> {
+    if (!env.CREATE_PASSWORD_HASH) return json({ error: 'The teacher password has not been set up.' }, 503);
+    const ip = request.headers.get('CF-Connecting-IP') || 'local';
+    const result = await guarded(env, `teacher:${ip}`, () => teacherPasswordMatches(password, env.CREATE_PASSWORD_HASH));
+    if (result === 'limited') return json({ error: 'Too many tries. Wait a minute, then try again.' }, 429);
+    if (result === 'wrong') return json({ error: 'Wrong password.' }, 401);
+    return null;
+}
+
+const onLaptop = (env: Env) => !!(env.LAN_URL && env.CLOUD_URL);
+
+// On the laptop: tell the online plaza to send signed-in students here, or with
+// a null url to stop. The password links it; the lease it returns renews it.
+// Returns what the teacher should know, or ''.
+async function linkOnline(env: Env, body: { password?: unknown; url: string | null }): Promise<string> {
+    if (!onLaptop(env)) return '';
+    const lease = body.password === undefined ? await plaza(env).setting('cloud_lease') : null;
+    if (body.password === undefined && !lease) return 'Sign out and in again so students are sent to this laptop.';
+    try {
+        const response = await fetch(new URL('/api/laptop', env.CLOUD_URL), {
+            method: 'POST', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(lease ? { lease, url: body.url } : body), signal: AbortSignal.timeout(8000)
+        });
+        const result: any = await response.json().catch(() => ({}));
+        if (!response.ok) return `Students are not being sent to this laptop: ${result.error || 'the online Pixel Plaza refused.'}`;
+        if (typeof result.lease === 'string') await plaza(env).saveSetting('cloud_lease', result.lease);
+        return '';
+    } catch {
+        return 'Students are not being sent to this laptop: the online Pixel Plaza is unreachable. Check the internet connection.';
+    }
+}
+
 function teacherAction(path: string, method: string, body: any): TeacherAction | null {
     if (path === '/api/teacher/status' && method === 'GET') return { kind: 'status' };
     if (method !== 'POST') return null;
@@ -61,7 +97,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
     if (path === '/api/health') return json({ ok: true });
 
-    if (path === '/api/student/config' && get) return json(await studentConfig(env));
+    if (path === '/api/student/config' && get) {
+        // Google sign-in needs HTTPS, which the laptop does not have: students
+        // sign in online and are sent back here.
+        if (onLaptop(env)) return json({ loginEnabled: false, googleClientId: '', allowedDomains: [], signInUrl: env.CLOUD_URL });
+        return json({ ...(await studentConfig(env)), laptopUrl: await plaza(env).laptopUrl() });
+    }
     if (path === '/api/student/login' && post) {
         const session = await studentLogin(env, body?.googleIdToken);
         const student = await resolveStudent(env, session.studentToken);
@@ -89,18 +130,33 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
 
     if (path === '/api/teacher/login' && post) {
-        if (!env.CREATE_PASSWORD_HASH) return json({ error: 'The teacher password has not been set up.' }, 503);
-        const ip = request.headers.get('CF-Connecting-IP') || 'local';
-        const result = await guarded(env, `teacher:${ip}`, () => teacherPasswordMatches(body?.password, env.CREATE_PASSWORD_HASH));
-        if (result === 'limited') return json({ error: 'Too many tries. Wait a minute, then try again.' }, 429);
-        if (result === 'wrong') return json({ error: 'Wrong password.' }, 401);
-        return json({ token: await plaza(env).startTeacherSession() });
+        const refused = await checkTeacherPassword(request, env, body?.password);
+        if (refused) return refused;
+        const token = await plaza(env).startTeacherSession();
+        return json({ token, notice: await linkOnline(env, { password: body.password, url: env.LAN_URL ?? null }) });
     }
     if (path.startsWith('/api/teacher/')) {
         const action = teacherAction(path, request.method, body);
         if (!action) return json({ error: 'That request is not valid.' }, 400);
         const result = await plaza(env).teacher(request.headers.get('x-teacher-session') || '', action);
-        return 'error' in result ? json({ error: result.error }, result.status) : json(result);
+        if ('error' in result) return json({ error: result.error }, result.status);
+        // Closing the class on the laptop stops sending students to it.
+        const notice = action.kind === 'open' ? await linkOnline(env, { url: action.open ? env.LAN_URL ?? null : null }) : '';
+        return json({ ...result, laptop: onLaptop(env) ? { url: env.LAN_URL, signInUrl: env.CLOUD_URL } : null, notice });
+    }
+
+    // Online: the teacher's laptop says where the class is playing.
+    if (path === '/api/laptop' && post) {
+        const url = body?.url === null ? null : laptopOrigin(body?.url);
+        if (body?.url !== null && !url) return json({ error: 'That laptop address is not valid.' }, 400);
+        if (typeof body?.lease === 'string') {
+            return await plaza(env).updateLaptop(body.lease, url) ? json({ ok: true })
+                : json({ error: 'the link expired. Sign out and in again on the laptop.' }, 401);
+        }
+        if (!url) return json({ error: 'That laptop address is not valid.' }, 400);
+        const refused = await checkTeacherPassword(request, env, body?.password);
+        if (refused) return refused;
+        return json({ lease: await plaza(env).linkLaptop(url) });
     }
 
     return json({ error: 'Not found.' }, 404);

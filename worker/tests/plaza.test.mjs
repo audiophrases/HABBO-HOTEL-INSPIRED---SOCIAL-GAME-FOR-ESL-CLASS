@@ -30,6 +30,9 @@ function startPinPlay() {
     const server = http.createServer((req, res) => {
         res.setHeader('content-type', 'application/json');
         const student = students[req.headers['x-student-token']];
+        if (req.url === '/api/student/config') {
+            return res.end(JSON.stringify({ loginEnabled: true, googleClientId: 'client-id', allowedDomains: [] }));
+        }
         if (req.url === '/api/student/me' && student) return res.end(JSON.stringify({ student }));
         res.statusCode = 401;
         res.end(JSON.stringify({ error: 'Please sign in again.' }));
@@ -37,12 +40,13 @@ function startPinPlay() {
     return new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server)));
 }
 
-async function startPlaza(pinPlayUrl, persistTo) {
+async function startPlaza(pinPlayUrl, persistTo, vars = {}) {
     const port = await freePort();
     const child = spawn(process.execPath, [wrangler, 'dev', '--port', String(port), '--inspector-port', '0',
         '--persist-to', persistTo, '--show-interactive-dev-session=false',
         '--var', `CLASS_PIN:${PIN}`, '--var', `CREATE_PASSWORD_HASH:${await sha256Hex(PASSWORD)}`,
-        '--var', `PINPLAY_API_URL:${pinPlayUrl}`], {
+        '--var', `PINPLAY_API_URL:${pinPlayUrl}`,
+        ...Object.entries(vars).flatMap(([key, value]) => ['--var', `${key}:${value}`])], {
         cwd: root, env: { ...process.env, WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'pipe', 'pipe']
     });
     let log = '';
@@ -208,5 +212,53 @@ test('a lesson in the plaza, then a restart that keeps everyone\'s progress', { 
         await plaza.stop();
         await new Promise(resolve => pinPlay.close(resolve));
         fs.rmSync(persistTo, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+    }
+});
+
+test("the class plays on the teacher's laptop; students sign in online and are sent there", { timeout: 120000 }, async () => {
+    const pinPlay = await startPinPlay();
+    const pinPlayUrl = `http://127.0.0.1:${pinPlay.address().port}`;
+    const dirs = [0, 1].map(() => fs.mkdtempSync(path.join(os.tmpdir(), 'pixel-plaza-test-')));
+    const lanUrl = 'http://192.168.1.20:8787';
+    const online = await startPlaza(pinPlayUrl, dirs[0]);
+    let laptop;
+    try {
+        laptop = await startPlaza(pinPlayUrl, dirs[1], { LAN_URL: lanUrl, CLOUD_URL: online.base });
+        const laptopUrl = async () => (await api(online.base, '/api/student/config')).body.laptopUrl;
+        assert.equal(await laptopUrl(), null);
+        // Google cannot sign in on the laptop's address: students go online for it.
+        assert.equal((await api(laptop.base, '/api/student/config')).body.signInUrl, online.base);
+
+        // Only the teacher can point students somewhere.
+        assert.equal((await api(online.base, '/api/laptop', { body: { password: 'nope', url: 'http://evil.example' } })).status, 401);
+        assert.equal((await api(online.base, '/api/laptop', { body: { lease: 'forged', url: 'http://evil.example' } })).status, 401);
+        assert.equal((await api(online.base, '/api/laptop', { body: { password: PASSWORD, url: 'javascript:alert(1)' } })).status, 400);
+        assert.equal(await laptopUrl(), null);
+
+        // Signing in on the laptop links it.
+        const login = await api(laptop.base, '/api/teacher/login', { body: { password: PASSWORD } });
+        assert.equal(login.body.notice, '');
+        const session = login.body.token;
+        assert.equal(await laptopUrl(), lanUrl);
+        const opened = await api(laptop.base, '/api/teacher/class', { session, body: { open: true } });
+        assert.equal(opened.body.notice, '');
+        assert.deepEqual(opened.body.laptop, { url: lanUrl, signInUrl: online.base });
+
+        // The PinPlay session from online carries the student's name onto the laptop.
+        const alex = await enter(laptop.base, 'signed-a', { skin: 1 });
+        assert.equal(alex.me.name, 'Alex');
+        alex.ws.close();
+        await alex.closed;
+
+        // Closing the class stops sending students to the laptop; opening it resumes.
+        await api(laptop.base, '/api/teacher/class', { session, body: { open: false } });
+        assert.equal(await laptopUrl(), null);
+        await api(laptop.base, '/api/teacher/class', { session, body: { open: true } });
+        assert.equal(await laptopUrl(), lanUrl);
+    } finally {
+        await laptop?.stop();
+        await online.stop();
+        await new Promise(resolve => pinPlay.close(resolve));
+        for (const dir of dirs) fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
 });

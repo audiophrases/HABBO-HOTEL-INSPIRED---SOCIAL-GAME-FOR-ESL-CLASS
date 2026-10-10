@@ -1,10 +1,11 @@
 .teacher-page { min-height: 100vh; padding: 2rem; max-width: 950px; margin: auto; }
 .teacher-header, .teacher-controls { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 2rem; }
 .teacher-header h1 { margin-bottom: .4rem; }
-.teacher-signin, .teacher-online, .teacher-entries { background: white; border-radius: 16px; padding: 1.5rem; }
+.teacher-signin, .teacher-laptop, .teacher-online, .teacher-entries { background: white; border-radius: 16px; padding: 1.5rem; }
 .teacher-signin { display: flex; flex-direction: column; gap: 1rem; max-width: 420px; }
 .teacher-signin input { padding: .8rem; font: inherit; }
-.teacher-online { margin-bottom: 1.5rem; }
+.teacher-laptop, .teacher-online { margin-bottom: 1.5rem; }
+.teacher-laptop p { overflow-wrap: anywhere; }
 .teacher-entry { border-top: 1px solid #ddd; padding: 1rem 0; }
 .teacher-entry p { margin: .7rem 0; overflow-wrap: anywhere; }
 .teacher-entry small { color: #555; }

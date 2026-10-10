@@ -52,6 +52,19 @@ export function plazaName(displayName: string): string {
     return /^[\p{L}\p{N} _-]{2,24}$/u.test(name) && chatProblem(name) === null ? name : 'Student';
 }
 
+// The teacher laptop's address as students reach it on the school network.
+// Only an http(s) origin is kept, so nothing else rides along in the redirect.
+export function laptopOrigin(value: unknown): string | null {
+    if (typeof value !== 'string' || value.length > 200) return null;
+    try {
+        const url = new URL(value);
+        if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return null;
+        return url.origin;
+    } catch {
+        return null;
+    }
+}
+
 // Constant-time for equal lengths; the length itself is not secret here.
 export function secretsMatch(actual: unknown, expected: string): boolean {
     if (typeof actual !== 'string' || !expected || actual.length !== expected.length) return false;

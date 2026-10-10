@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index.ts';
 import type { PinPlayStudent } from './pinplay.ts';
-import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar } from './rules.ts';
+import { type Avatar, EMOTES, SPAWN, chatProblem, clampPosition, defaultAvatar, plazaName, sanitizeAvatar, secretsMatch } from './rules.ts';
 
 const TICKET_MS = 60_000;
 const TEACHER_SESSION_MS = 12 * 60 * 60 * 1000;
@@ -88,6 +88,35 @@ export class PlazaRoom extends DurableObject<Env> {
         this.sql.exec('DELETE FROM teacher_sessions WHERE expires < ?', now);
         this.sql.exec('INSERT INTO teacher_sessions (token, expires) VALUES (?, ?)', token, now + TEACHER_SESSION_MS);
         return token;
+    }
+
+    // Online: where the teacher's laptop runs the class (README, "Play on the
+    // teacher's laptop"), so students are sent there after signing in. The lease
+    // lets the laptop move or withdraw it later without the password.
+    linkLaptop(url: string): string {
+        const lease = crypto.randomUUID() + crypto.randomUUID();
+        this.saveSetting('laptop', JSON.stringify({ url, lease, expires: Date.now() + TEACHER_SESSION_MS }));
+        return lease;
+    }
+
+    updateLaptop(lease: string, url: string | null): boolean {
+        const laptop = this.laptop();
+        if (!laptop || !secretsMatch(lease, laptop.lease)) return false;
+        this.saveSetting('laptop', JSON.stringify({ ...laptop, url, expires: Date.now() + TEACHER_SESSION_MS }));
+        return true;
+    }
+
+    laptopUrl(): string | null {
+        return this.laptop()?.url ?? null;
+    }
+
+    // On the laptop, this keeps the online plaza's lease.
+    setting(key: string): string | null {
+        return this.sql.exec<{ value: string }>('SELECT value FROM settings WHERE key = ?', key).toArray()[0]?.value ?? null;
+    }
+
+    saveSetting(key: string, value: string): void {
+        this.sql.exec('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value', key, value);
     }
 
     teacher(token: string, action: TeacherAction): TeacherStatus | { error: string; status: number } {
@@ -186,7 +215,13 @@ export class PlazaRoom extends DurableObject<Env> {
     // ---------- Internals ----------
 
     private isOpen(): boolean {
-        return this.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key = 'open'").toArray()[0]?.value === '1';
+        return this.setting('open') === '1';
+    }
+
+    private laptop(): { url: string | null; lease: string; expires: number } | null {
+        const value = this.setting('laptop');
+        const laptop = value ? JSON.parse(value) : null;
+        return laptop && laptop.expires > Date.now() ? laptop : null;
     }
 
     private seats(): Seat[] {
@@ -258,8 +293,7 @@ export class PlazaRoom extends DurableObject<Env> {
 
     // Closing rejects pending chat and stops new joins; students already in stay.
     private setOpen(open: boolean): void {
-        this.sql.exec("INSERT INTO settings (key, value) VALUES ('open', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            open ? '1' : '0');
+        this.saveSetting('open', open ? '1' : '0');
         if (open) return;
         const rejected = this.sql.exec<{ student_key: string }>(
             "UPDATE chat SET status = 'rejected' WHERE status = 'pending' RETURNING student_key").toArray();

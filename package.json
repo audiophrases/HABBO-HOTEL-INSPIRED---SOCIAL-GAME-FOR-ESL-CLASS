@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:worker": "wrangler dev",
+    "classroom": "npm run build && node scripts/classroom.mjs",
     "build": "wrangler types worker/runtime.d.ts --include-env=false && tsc -b && vite build",
     "lint": "oxlint",
     "test": "npm run build && node --test \"worker/tests/*.test.mjs\"",

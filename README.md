@@ -63,6 +63,21 @@ A dropped connection (a closed lid, Wi-Fi roaming) reconnects by itself. Opening
 
 To change the PIN, run `npx wrangler secret put CLASS_PIN` again.
 
+## Play on the teacher's laptop
+
+The class can play on the teacher's laptop instead, over the school network. Students still sign in with Google online, because Google sign-in needs HTTPS, and are then sent to the laptop with their PinPlay session, so their name comes with them.
+
+Once on the laptop: install Node.js, copy the project, run `npm ci`, and create `.dev.vars` from `.dev.vars.example` with the real `CLASS_PIN` and the same `CREATE_PASSWORD_HASH` as online. Then, each lesson:
+
+1. Run `npm run classroom` and keep the window open. It prints the laptop's address on the school network, such as `http://192.168.1.20:8787`. The first time, allow Windows to let it through the firewall on private networks.
+2. On the laptop, open `http://localhost:8787/teacher` and sign in. This tells the online site to send students to the laptop. Then press **Open class**.
+3. Students open the online site as usual and sign in with Google. They go straight to the laptop, type the class PIN there, and choose their avatar.
+4. **Close class** stops sending students to the laptop. The link also ends by itself after 12 hours. Until then, a student who signs in online is sent to the laptop's address even if it is switched off.
+
+`PLAZA_LAN_URL` overrides the detected address, for example when the laptop has more than one network. `PORT` changes the port. Progress on the laptop is kept in `.wrangler/classroom`, separate from the online plaza: avatars chosen online are not carried over, and students choose them again the first time.
+
+The laptop's address is plain HTTP, so student sessions cross the school network unencrypted. Sign in to the teacher controls on the laptop itself (`localhost`), not from another device.
+
 ## Costs
 
 The Workers free plan is enough for a class. The heaviest case, 30 students all walking non-stop for an hour, is about 54,000 of the 100,000 Durable Object requests the free plan allows each day. Position updates are capped at 10 a second per student (`SEND_EVERY_MS` in `src/game/scenes/LobbyScene.ts`), and outgoing messages are free.

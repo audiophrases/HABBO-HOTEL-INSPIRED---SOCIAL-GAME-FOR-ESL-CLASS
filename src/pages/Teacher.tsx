@@ -3,7 +3,11 @@ import { Link } from 'react-router-dom';
 import './Teacher.css';
 
 type Entry = { id: string; studentKey: string; sender: string; text: string; timestamp: number; status: string };
-type Status = { open: boolean; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[] };
+// laptop is set when this runs on the teacher's laptop (npm run classroom).
+type Status = {
+  open: boolean; entries: Entry[]; muted: string[]; online: { studentKey: string; name: string }[];
+  laptop?: { url: string; signInUrl: string } | null; notice?: string;
+};
 
 async function call<T>(path: string, init: RequestInit): Promise<T> {
   const response = await fetch(`/api/teacher/${path}`, init);
@@ -18,6 +22,8 @@ export default function Teacher() {
   const [token, setToken] = useState('');
   const [status, setStatus] = useState<Status | null>(null);
   const [error, setError] = useState('');
+  // A problem sending students to this laptop, from sign-in or opening the class.
+  const [notice, setNotice] = useState('');
 
   const request = useCallback((path: string, body?: object) => call<Status>(path, {
     method: body ? 'POST' : 'GET',
@@ -43,19 +49,24 @@ export default function Teacher() {
 
   const signIn = async () => {
     try {
-      const { token: session } = await call<{ token: string }>('login', {
+      const { token: session, notice: linked } = await call<{ token: string; notice?: string }>('login', {
         method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password })
       });
       setStatus(await call<Status>('status', { headers: { 'x-teacher-session': session } }));
       setPassword('');
       setError('');
+      setNotice(linked || '');
       setToken(session);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Sign-in failed.'); }
   };
 
   const action = async (path: string, body: object) => {
-    try { setStatus(await request(path, body)); setError(''); }
-    catch (cause) { failed(cause); }
+    try {
+      const result = await request(path, body);
+      setStatus(result);
+      setError('');
+      if (result.notice !== undefined) setNotice(result.notice);
+    } catch (cause) { failed(cause); }
   };
 
   return <main className="teacher-page">
@@ -76,6 +87,12 @@ export default function Teacher() {
         </button>
         <button className="btn btn-secondary" onClick={() => { setStatus(null); setToken(''); }}>Sign out</button>
       </section>
+      {status.laptop && <section className="teacher-laptop">
+        <h2>Playing on this laptop</h2>
+        <p>Students go to <strong>{status.laptop.signInUrl}</strong> and sign in with Google. They are then sent
+          here, to <strong>{status.laptop.url}</strong>, while the class is open.</p>
+        {notice && <p role="alert" className="teacher-error">{notice}</p>}
+      </section>}
       <section className="teacher-online">
         <h2>In the Plaza now ({status.online.length})</h2>
         <p>{status.online.length ? status.online.map(student => student.name).join(', ') : 'Nobody yet.'}</p>
